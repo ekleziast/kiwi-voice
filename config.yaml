@@ -60,16 +60,16 @@ tts:
     use_speaker_boost: true
     speed: 1.0
     style_presets:
-      neutral:    { stability: 0.45, style: 0.25, speed: 1.00 }
-      excited:    { stability: 0.45, style: 0.25, speed: 1.00 }
-      calm:       { stability: 0.45, style: 0.25, speed: 1.00 }
-      confident:  { stability: 0.45, style: 0.25, speed: 1.00 }
-      whisper:    { stability: 0.45, style: 0.25, speed: 1.00 }
-      sad:        { stability: 0.45, style: 0.25, speed: 1.00 }
-      angry:      { stability: 0.45, style: 0.25, speed: 1.00 }
-      playful:    { stability: 0.45, style: 0.25, speed: 1.00 }
-      serious:    { stability: 0.45, style: 0.25, speed: 1.00 }
-      cheerful:   { stability: 0.45, style: 0.25, speed: 1.00 }
+      neutral:    { stability: 0.50, style: 0.20, speed: 1.00 }
+      excited:    { stability: 0.20, style: 0.80, speed: 1.15 }
+      calm:       { stability: 0.80, style: 0.08, speed: 0.88 }
+      confident:  { stability: 0.55, style: 0.45, speed: 1.02 }
+      whisper:    { stability: 0.85, style: 0.05, speed: 0.85 }
+      sad:        { stability: 0.75, style: 0.35, speed: 0.82 }
+      angry:      { stability: 0.20, style: 0.75, speed: 1.12 }
+      playful:    { stability: 0.30, style: 0.65, speed: 1.10 }
+      serious:    { stability: 0.65, style: 0.30, speed: 0.95 }
+      cheerful:   { stability: 0.35, style: 0.60, speed: 1.08 }
 
   # RunPod serverless (qwen_backend=runpod)
   # Keys: .env → RUNPOD_TTS_ENDPOINT_ID, RUNPOD_API_KEY
@@ -110,7 +110,7 @@ realtime:
   # Noise calibration
   noise_sample_duration: 2.0
   noise_threshold_multiplier: 1.3
-  min_silence_threshold: 0.005
+  min_silence_threshold: 0.015
 
   # Speech detection
   min_speech_duration: 0.3

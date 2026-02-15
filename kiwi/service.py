@@ -870,27 +870,14 @@ class KiwiServiceOpenClaw:
                 sd.play(audio, sample_rate, device=self.config.output_device)
 
                 poll_interval = 0.05
-                max_duration = duration_s + 1.25  # буфер на хвост/драйвер
-                started = time.time()
+                max_duration = duration_s + 1.5  # буфер на хвост/драйвер
+                started = time.monotonic()
 
                 interrupted = False
 
-                # Надёжное ожидание завершения playback без reliance на sd.get_stream(),
-                # которое может указывать на input stream (микрофон), а не output.
-                done_event = threading.Event()
-
-                def _wait_playback_done():
-                    try:
-                        sd.wait()
-                    except Exception:
-                        pass
-                    finally:
-                        done_event.set()
-
-                wait_thread = threading.Thread(target=_wait_playback_done, daemon=True)
-                wait_thread.start()
-
-                while not done_event.wait(timeout=poll_interval):
+                # Чисто таймерный подход — sd.wait() может зависнуть навечно
+                # на Windows при проблемах с аудио-устройством (GIL-блокировка).
+                while (time.monotonic() - started) < max_duration:
                     if self._barge_in_requested:
                         interrupted = True
                         try:
@@ -899,22 +886,20 @@ class KiwiServiceOpenClaw:
                             pass
                         kiwi_log("TTS-CHUNK", "Playback interrupted by barge-in", level="INFO")
                         break
+                    time.sleep(poll_interval)
+                else:
+                    # Hard timeout — принудительно останавливаем
+                    kiwi_log(
+                        "TTS-CHUNK",
+                        f"Playback hard-timeout after {max_duration:.2f}s; forcing stop",
+                        level="WARNING",
+                    )
+                    try:
+                        sd.stop()
+                    except Exception:
+                        pass
 
-                    if (time.time() - started) >= max_duration:
-                        kiwi_log(
-                            "TTS-CHUNK",
-                            f"Playback timeout after {max_duration:.2f}s; forcing stop",
-                            level="WARNING",
-                        )
-                        try:
-                            sd.stop()
-                        except Exception:
-                            pass
-                        break
-
-                done_event.wait(timeout=1.0)
-
-            elapsed = time.time() - started
+            elapsed = time.monotonic() - started
             kiwi_log(
                 "TTS-CHUNK",
                 "Playback finished"
