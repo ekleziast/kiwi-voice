@@ -31,3 +31,9 @@ librosa>=0.10.0
 
 # Silero VAD (Voice Activity Detection - local, fast)
 onnxruntime>=1.15.0
+
+# Noise Reduction (spectral gating)
+noisereduce>=3.0.0
+
+# Device identity (Ed25519 signing for gateway auth)
+cryptography>=41.0.0

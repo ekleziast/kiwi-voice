@@ -45,7 +45,7 @@ class UnifiedVAD:
         silero_min_silence_duration_ms: int = 100,
         # Energy VAD настройки
         energy_threshold_multiplier: float = 1.5,
-        energy_min_threshold: float = 0.004,
+        energy_min_threshold: float = 0.008,
         energy_max_threshold: float = 0.1,
         # Комбинирование
         use_silero: bool = True,

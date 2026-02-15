@@ -1,6 +1,7 @@
 # Environment & secrets
 .env
 !.env.example
+device-identity.json
 
 # Python
 __pycache__/

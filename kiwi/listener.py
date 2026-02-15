@@ -50,6 +50,14 @@ except ImportError:
     UNIFIED_VAD_AVAILABLE = False
     kiwi_log("LISTENER", "Unified VAD not available")
 
+# Noise Reduction (spectral gating)
+try:
+    import noisereduce as nr
+    NOISEREDUCE_AVAILABLE = True
+except ImportError:
+    NOISEREDUCE_AVAILABLE = False
+    kiwi_log("LISTENER", "noisereduce not available — noise suppression disabled")
+
 # Torch for Silero VAD (optional)
 try:
     import torch
@@ -1081,7 +1089,7 @@ class KiwiListener:
             self._noise_floor = np.median(noise_samples)
             self._silence_threshold = self._noise_floor * self.config.noise_threshold_multiplier
             # РњРёРЅРёРјР°Р»СЊРЅС‹Р№ РїРѕСЂРѕРі РґР»СЏ Р·Р°С‰РёС‚С‹ РѕС‚ С€СѓРјРѕРІ
-            self._silence_threshold = max(self._silence_threshold, 0.004)
+            self._silence_threshold = max(self._silence_threshold, 0.008)
             kiwi_log("CALIB", f"Done: noise_floor={self._noise_floor:.6f}, threshold={self._silence_threshold:.6f}")
         else:
             self._noise_floor = 0.005
@@ -1264,11 +1272,17 @@ class KiwiListener:
         speech_start_time = None
         
         # === VAD CONTINUATION LIMITER ===
-        vad_continuation_count = 0  # РЎС‡С‘С‚С‡РёРє РїСЂРѕРґР»РµРЅРёР№ Р·Р°РїРёСЃРё С‡РµСЂРµР· VAD
+        vad_continuation_count = 0  # РЎС‡С'С‚С‡РёРє РїСЂРѕРґР»РµРЅРёР№ Р·Р°РїРёСЃРё С‡РµСЂРµР· VAD
         MAX_VAD_CONTINUATIONS = 3    # РњР°РєСЃРёРјСѓРј РїСЂРѕРґР»РµРЅРёР№ РїРѕРґСЂСЏРґ
-        
+
+        # === CONTINUOUS NOISE RECALIBRATION ===
+        noise_recalib_samples = []   # Ambient samples for recalibration
+        NOISE_RECALIB_INTERVAL = 100  # Every 100 quiet chunks (~30s at 0.3s/chunk)
+        quiet_chunk_counter = 0
+
         def audio_callback(indata, frames, time_info, status):
             nonlocal audio_buffer, is_speaking, silence_counter, speech_start_time, pre_buffer, vad_continuation_count
+            nonlocal noise_recalib_samples, quiet_chunk_counter
             
             if status:
                 status_text = str(status)
@@ -1314,7 +1328,13 @@ class KiwiListener:
             # РџСЂРѕРІРµСЂСЏРµРј РѕР±Р° РїРѕСЂРѕРіР°: Р°РґР°РїС‚РёРІРЅС‹Р№ Р РјРёРЅРёРјР°Р»СЊРЅС‹Р№
             effective_min_speech_volume = self._get_effective_min_speech_volume()
             is_sound = volume > self._silence_threshold and volume > effective_min_speech_volume
-            
+
+            # === VAD OVERRIDE: volume выше min но ниже noise threshold →
+            # Silero VAD решает (защита от завышенного noise floor) ===
+            if not is_sound and not is_speaking and self._vad_enabled:
+                if volume > effective_min_speech_volume and self._check_vad(audio_chunk):
+                    is_sound = True
+
             # =================================================================
             # Р“Р›РђР’РќРђРЇ Р—РђР©РРўРђ: РљРѕРіРґР° Kiwi РіРѕРІРѕСЂРёС‚ вЂ” РќР• Р·Р°РїРёСЃС‹РІР°РµРј Р°СѓРґРёРѕ РґР»СЏ Whisper
             # РћР±СЂР°Р±Р°С‚С‹РІР°РµРј РўРћР›Р¬РљРћ barge-in Р»РѕРіРёРєСѓ. РРЅР°С‡Рµ Kiwi СѓСЃР»С‹С€РёС‚ СЃРІРѕР№ РіРѕР»РѕСЃ
@@ -1460,8 +1480,8 @@ class KiwiListener:
                         # === РЈР›РЈР§РЁР•РќРќРђРЇ Р›РћР“РРљРђ: РіСЂРѕРјРєРѕСЃС‚СЊ + VAD + Р»РёРјРёС‚ ===
                         should_extend = False
                         
-                        if avg_recent_volume >= self._silence_threshold:
-                            # Р“СЂРѕРјРєРѕСЃС‚СЊ РїРѕРіСЂР°РЅРёС‡РЅР°СЏ вЂ” РїСЂРѕРІРµСЂСЏРµРј VAD
+                        if avg_recent_volume >= effective_min_speech_volume:
+                            # Громкость выше минимума речи — проверяем VAD
                             if self._check_vad_continuation(audio_buffer):
                                 vad_continuation_count += 1
                                 if vad_continuation_count <= MAX_VAD_CONTINUATIONS:
@@ -1488,6 +1508,27 @@ class KiwiListener:
                             silence_counter = 0
                             speech_start_time = None
                 
+                # === CONTINUOUS NOISE RECALIBRATION ===
+                # When idle (not speaking, not Kiwi speaking), collect ambient samples
+                # and periodically recalibrate the noise floor
+                if not is_speaking and not is_kiwi_speaking:
+                    noise_recalib_samples.append(volume)
+                    quiet_chunk_counter += 1
+                    if quiet_chunk_counter >= NOISE_RECALIB_INTERVAL:
+                        if noise_recalib_samples:
+                            new_floor = np.median(noise_recalib_samples)
+                            new_threshold = max(new_floor * self.config.noise_threshold_multiplier, 0.005)
+                            if abs(new_threshold - self._silence_threshold) > 0.002:
+                                kiwi_log("CALIB", f"Recalibrated: noise_floor={new_floor:.6f}, threshold={self._silence_threshold:.4f} -> {new_threshold:.4f}")
+                                self._noise_floor = new_floor
+                                self._silence_threshold = new_threshold
+                        noise_recalib_samples.clear()
+                        quiet_chunk_counter = 0
+                else:
+                    # Reset recalibration counter when speaking
+                    noise_recalib_samples.clear()
+                    quiet_chunk_counter = 0
+
                 if speech_start_time and (time.time() - speech_start_time > self._max_speech_duration):
                     kiwi_log("END", "Max speech duration reached")
                     self._submit_audio(audio_buffer.copy())
@@ -1592,7 +1633,32 @@ class KiwiListener:
         
         audio = np.concatenate(audio_chunks)
         duration = len(audio) / self.config.sample_rate
-        
+
+        # === ENERGY GATE: РѕС‚СЃРµРёРІР°РµРј Р±СѓС„РµСЂС‹ СЃ РЅРёР·РєРѕР№ СЌРЅРµСЂРіРёРµР№ (С„РѕРЅРѕРІС‹Р№ С€СѓРј) ===
+        # Порог = silence_threshold (уже откалиброван выше noise floor).
+        # Не умножаем — RMS буфера включает pre-buffer и trailing silence,
+        # поэтому всегда ниже пиковой громкости отдельных чанков.
+        rms = np.sqrt(np.mean(audio ** 2))
+        energy_gate_threshold = 0.006  # fixed low gate; real filtering: VAD + noisereduce + Whisper
+        if rms < energy_gate_threshold:
+            kiwi_log("SUBMIT", f"Rejected: energy gate (rms={rms:.4f} < {energy_gate_threshold:.4f}). Likely noise.")
+            return
+
+        # === NOISE REDUCTION: РѕС‡РёСЃС‚РєР° Р°СѓРґРёРѕ РѕС‚ СЃС‚Р°С†РёРѕРЅР°СЂРЅРѕРіРѕ С€СѓРјР° ===
+        if NOISEREDUCE_AVAILABLE:
+            try:
+                rms_before = rms
+                audio = nr.reduce_noise(
+                    y=audio,
+                    sr=self.config.sample_rate,
+                    stationary=True,
+                    prop_decrease=0.4,
+                )
+                rms_after = np.sqrt(np.mean(audio ** 2))
+                kiwi_log("DENOISE", f"Noise reduction applied (rms: {rms_before:.4f} -> {rms_after:.4f})")
+            except Exception as e:
+                kiwi_log("DENOISE", f"Noise reduction error: {e}", level="WARNING")
+
         # === VAD CHECK: Р¤РёРЅР°Р»СЊРЅР°СЏ РїСЂРѕРІРµСЂРєР° С‡РµСЂРµР· Silero VAD РїРµСЂРµРґ РѕС‚РїСЂР°РІРєРѕР№ РІ Whisper ===
         # Р Р°Р·Р±РёРІР°РµРј Р°СѓРґРёРѕ РЅР° С‡Р°РЅРєРё Рё РїСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ РІ РЅС‘Рј РґРµР№СЃС‚РІРёС‚РµР»СЊРЅРѕ РµСЃС‚СЊ СЂРµС‡СЊ
         if self._vad_enabled and duration >= 0.5:
@@ -1999,7 +2065,7 @@ class KiwiListener:
                 best_of=5,
                 condition_on_previous_text=False,  # Р’РђР–РќРћ: False С‡С‚РѕР±С‹ РЅРµ РіР°Р»Р»СЋС†РёРЅРёСЂРѕРІР°С‚СЊ РЅР° РѕСЃРЅРѕРІРµ РїСЂРµРґС‹РґСѓС‰РµРіРѕ С‚РµРєСЃС‚Р°
                 initial_prompt=WHISPER_INITIAL_PROMPT,  # РџРѕРґСЃРєР°Р·РєР° РґР»СЏ Р»СѓС‡С€РµРіРѕ СЂР°СЃРїРѕР·РЅР°РІР°РЅРёСЏ
-                no_speech_threshold=0.6,  # РџРѕСЂРѕРі РІРµСЂРѕСЏС‚РЅРѕСЃС‚Рё "РЅРµС‚ СЂРµС‡Рё"
+                no_speech_threshold=0.85,  # РџРѕСЂРѕРі РІРµСЂРѕСЏС‚РЅРѕСЃС‚Рё "РЅРµС‚ СЂРµС‡Рё"
             )
             
             kiwi_log("WHISPER", f"Detected language: {info.language}, probability: {info.language_probability:.2f}")
@@ -2012,7 +2078,7 @@ class KiwiListener:
                 
                 kiwi_log("WHISPER", f"Segment: [{segment.start:.2f}s -> {segment.end:.2f}s] '{segment.text}' (no_speech={no_speech:.2f}, avg_logprob={avg_logprob:.2f})")
 
-                if no_speech > 0.6:
+                if no_speech > 0.85:
                     kiwi_log("WHISPER", f"Segment skipped (no_speech): {no_speech:.2f} > 0.6", level="WARNING")
                     continue
                 

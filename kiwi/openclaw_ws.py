@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """OpenClaw WebSocket client for Kiwi Voice (Gateway v3 protocol)."""
 
+import base64
+import hashlib
 import json
 import os
 import re
@@ -9,6 +11,9 @@ import threading
 import time
 from typing import Any, Callable, Dict, Optional
 from uuid import uuid4
+
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives import serialization
 
 try:
     from kiwi.utils import kiwi_log
@@ -89,6 +94,9 @@ class OpenClawWebSocket:
         # Gateway token
         self._gateway_token = self._load_gateway_token()
 
+        # Device identity (Ed25519 key pair for gateway device auth)
+        self._device_identity = self._load_or_create_device_identity()
+
         # Session key format: "agent:{agent_id}:{session_id}"
         self._session_key = f"agent:{config.openclaw_session_id}:{config.openclaw_session_id}"
 
@@ -158,6 +166,97 @@ class OpenClawWebSocket:
 
         self._log_ws("No gateway token found! Auth will fail.", "ERROR")
         return ""
+
+    # --- Device Identity (Ed25519) ---
+
+    def _load_or_create_device_identity(self) -> dict:
+        """Загружает или генерирует Ed25519 ключевую пару для device auth.
+
+        Ключи сохраняются в ~/.openclaw/workspace/skills/kiwi-voice/device-identity.json
+        чтобы device ID оставался постоянным между перезапусками.
+        """
+        identity_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "device-identity.json",
+        )
+
+        # Попробуем загрузить существующую identity
+        if os.path.exists(identity_path):
+            try:
+                with open(identity_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if data.get("deviceId") and data.get("publicKey") and data.get("privateKey"):
+                    self._log_ws(f"Device identity loaded (id={data['deviceId'][:12]}...)", "DEBUG")
+                    return data
+            except Exception as e:
+                self._log_ws(f"Failed to load device identity: {e}", "WARN")
+
+        # Генерируем новую
+        private_key = ed25519.Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+
+        priv_bytes = private_key.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        pub_bytes = public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+
+        pub_b64 = base64.urlsafe_b64encode(pub_bytes).rstrip(b"=").decode("ascii")
+        priv_b64 = base64.urlsafe_b64encode(priv_bytes).rstrip(b"=").decode("ascii")
+        device_id = hashlib.sha256(pub_bytes).hexdigest()
+
+        data = {"deviceId": device_id, "publicKey": pub_b64, "privateKey": priv_b64}
+
+        try:
+            os.makedirs(os.path.dirname(identity_path), exist_ok=True)
+            with open(identity_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            self._log_ws(f"Device identity created (id={device_id[:12]}...)", "INFO")
+        except Exception as e:
+            self._log_ws(f"Failed to save device identity: {e}", "WARN")
+
+        return data
+
+    def _build_device_auth(self, nonce: str) -> dict:
+        """Строит device auth объект для connect request.
+
+        Формат payload (v2):
+          v2|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce
+        """
+        identity = self._device_identity
+        signed_at_ms = int(time.time() * 1000)
+
+        scopes_str = ",".join(["operator.admin"])
+        payload_parts = [
+            "v2",
+            identity["deviceId"],
+            "gateway-client",   # client.id
+            "backend",          # client.mode
+            "operator",         # role
+            scopes_str,
+            str(signed_at_ms),
+            self._gateway_token,
+            nonce,
+        ]
+        payload = "|".join(payload_parts)
+
+        # Подписываем Ed25519
+        priv_bytes = base64.urlsafe_b64decode(identity["privateKey"] + "==")
+        private_key = ed25519.Ed25519PrivateKey.from_private_bytes(priv_bytes)
+        signature = private_key.sign(payload.encode("utf-8"))
+        sig_b64 = base64.urlsafe_b64encode(signature).rstrip(b"=").decode("ascii")
+
+        return {
+            "id": identity["deviceId"],
+            "publicKey": identity["publicKey"],
+            "signature": sig_b64,
+            "signedAt": signed_at_ms,
+            "nonce": nonce,
+        }
 
     def _get_ws_url(self) -> str:
         """Формирует URL для WebSocket подключения (без пути!)."""
@@ -641,6 +740,10 @@ class OpenClawWebSocket:
         data = payload.get("data", {})
         seq = payload.get("seq", -1)
 
+        # Игнорируем события от чужих сессий.
+        if session_key and session_key != self._session_key:
+            return
+
         if not isinstance(data, dict):
             data = {"value": data}
 
@@ -774,6 +877,14 @@ class OpenClawWebSocket:
         run_id = payload.get("runId", "")
         session_key = payload.get("sessionKey", "")
         content = self._extract_text_from_payload(payload, state)
+
+        # Игнорируем события от чужих сессий (другие агенты на том же Gateway).
+        if session_key and session_key != self._session_key:
+            self._log_ws(
+                f"Ignoring event for foreign sessionKey={session_key} (mine={self._session_key}, state={state})",
+                "DEBUG",
+            )
+            return
 
         # Игнорируем события от предыдущих/чужих runId, если уже знаем активный runId.
         if run_id and self._current_run_id and run_id != self._current_run_id:
@@ -946,6 +1057,7 @@ class OpenClawWebSocket:
             "auth": {
                 "token": self._gateway_token
             },
+            "device": self._build_device_auth(nonce),
             "locale": "ru-RU",
             "userAgent": "kiwi-voice/1.0"
         }

@@ -84,16 +84,14 @@ class StreamingTTSManager:
             self._graceful_shutdown = graceful
             if graceful:
                 # Отправляем остаток буфера если есть
-                remaining = self._buffer.strip()
-                if remaining and len(remaining) > len(self._sent_text):
-                    final_chunk = remaining[len(self._sent_text):].strip()
-                    if final_chunk:
-                        kiwi_log(
-                            "STREAM-TTS",
-                            f"Queuing final chunk ({len(final_chunk)} chars): {final_chunk[:50]}...",
-                            level="INFO",
-                        )
-                        self._enqueue_chunk_locked(final_chunk)
+                final_chunk = self._buffer[len(self._sent_text):].strip()
+                if final_chunk:
+                    kiwi_log(
+                        "STREAM-TTS",
+                        f"Queuing final chunk ({len(final_chunk)} chars): {final_chunk[:50]}...",
+                        level="INFO",
+                    )
+                    self._enqueue_chunk_locked(final_chunk)
             self._finalized = True
             self._playback_cond.notify_all()
 

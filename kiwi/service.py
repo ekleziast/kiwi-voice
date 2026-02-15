@@ -76,6 +76,7 @@ import time
 import json
 import re
 import traceback
+from dataclasses import dataclass
 from typing import Optional, Dict, Any, Tuple
 import queue
 
@@ -128,6 +129,22 @@ from kiwi.openclaw_ws import OpenClawWebSocket
 from kiwi.openclaw_cli import OpenClawCLI
 from kiwi.task_announcer import TaskStatusAnnouncer
 from kiwi.text_processing import clean_chunk_for_tts, normalize_tts_text, split_text_into_chunks
+
+
+@dataclass
+class CommandContext:
+    """Per-invocation state carried between pipeline stages in _on_wake_word."""
+    command: str
+    command_lower: str = ""
+    timestamp: float = 0.0
+    speaker_id: str = "unknown"
+    speaker_name: str = "Незнакомец"
+    speaker_confidence: float = 0.0
+    speaker_music_prob: float = 0.0
+    is_owner: bool = False
+    owner_profile_ready: bool = False
+    approved_command_from_owner: Optional[str] = None
+    abort: bool = False
 
 
 class KiwiServiceOpenClaw:
@@ -190,6 +207,7 @@ class KiwiServiceOpenClaw:
         self._audio_queue: queue.Queue = queue.Queue()
         self._streaming_playback_thread: Optional[threading.Thread] = None
         self._streaming_stop_event = threading.Event()
+        self._sd_play_lock = threading.Lock()
         self._is_streaming = False
         
         # === STREAMING TTS MANAGER ===
@@ -794,10 +812,16 @@ class KiwiServiceOpenClaw:
 
     def _speak_chunk(self, chunk: str):
         """Генерирует и воспроизводит один чанк текста (используется статус-озвучкой)."""
+        # Don't start synthesis if response audio is already playing
+        if self._is_speaking:
+            return
         result = self._synthesize_chunk(chunk)
         if not result:
             return
         audio, sample_rate = result
+        # Re-check: streaming response may have started during synthesis
+        if self._is_speaking:
+            return
         self._play_audio_chunk_streaming(audio, sample_rate)
     
     def _play_audio_chunk_streaming(self, audio: np.ndarray, sample_rate: int):
@@ -842,52 +866,53 @@ class KiwiServiceOpenClaw:
             if self._task_status_announcer:
                 self._task_status_announcer.on_tts_playing(True)
              
-            sd.play(audio, sample_rate, device=self.config.output_device)
+            with self._sd_play_lock:
+                sd.play(audio, sample_rate, device=self.config.output_device)
 
-            poll_interval = 0.05
-            max_duration = duration_s + 1.25  # буфер на хвост/драйвер
-            started = time.time()
+                poll_interval = 0.05
+                max_duration = duration_s + 1.25  # буфер на хвост/драйвер
+                started = time.time()
 
-            interrupted = False
+                interrupted = False
 
-            # Надёжное ожидание завершения playback без reliance на sd.get_stream(),
-            # которое может указывать на input stream (микрофон), а не output.
-            done_event = threading.Event()
+                # Надёжное ожидание завершения playback без reliance на sd.get_stream(),
+                # которое может указывать на input stream (микрофон), а не output.
+                done_event = threading.Event()
 
-            def _wait_playback_done():
-                try:
-                    sd.wait()
-                except Exception:
-                    pass
-                finally:
-                    done_event.set()
-
-            wait_thread = threading.Thread(target=_wait_playback_done, daemon=True)
-            wait_thread.start()
-
-            while not done_event.wait(timeout=poll_interval):
-                if self._barge_in_requested:
-                    interrupted = True
+                def _wait_playback_done():
                     try:
-                        sd.stop()
+                        sd.wait()
                     except Exception:
                         pass
-                    kiwi_log("TTS-CHUNK", "Playback interrupted by barge-in", level="INFO")
-                    break
+                    finally:
+                        done_event.set()
 
-                if (time.time() - started) >= max_duration:
-                    kiwi_log(
-                        "TTS-CHUNK",
-                        f"Playback timeout after {max_duration:.2f}s; forcing stop",
-                        level="WARNING",
-                    )
-                    try:
-                        sd.stop()
-                    except Exception:
-                        pass
-                    break
+                wait_thread = threading.Thread(target=_wait_playback_done, daemon=True)
+                wait_thread.start()
 
-            done_event.wait(timeout=1.0)
+                while not done_event.wait(timeout=poll_interval):
+                    if self._barge_in_requested:
+                        interrupted = True
+                        try:
+                            sd.stop()
+                        except Exception:
+                            pass
+                        kiwi_log("TTS-CHUNK", "Playback interrupted by barge-in", level="INFO")
+                        break
+
+                    if (time.time() - started) >= max_duration:
+                        kiwi_log(
+                            "TTS-CHUNK",
+                            f"Playback timeout after {max_duration:.2f}s; forcing stop",
+                            level="WARNING",
+                        )
+                        try:
+                            sd.stop()
+                        except Exception:
+                            pass
+                        break
+
+                done_event.wait(timeout=1.0)
 
             elapsed = time.time() - started
             kiwi_log(
@@ -1225,47 +1250,69 @@ class KiwiServiceOpenClaw:
     
     def _on_wake_word(self, command: str):
         """
-        Упрощенный обработчик wake word.
-        Отправляет команду напрямую в OpenClaw - пусть LLM сама разбирается.
+        Wake word handler — pipeline orchestrator.
+        Each stage receives a CommandContext and may set ctx.abort = True to stop.
         """
-        # === STATE MACHINE: Переход в PROCESSING ===
+        ctx = CommandContext(command=command)
+        for stage in [
+            self._stage_init_and_dedup,
+            self._stage_resolve_speaker,
+            self._stage_check_approval,
+            self._stage_handle_special_commands,
+            self._stage_handle_stop_cancel,
+            self._stage_completeness_check,
+            self._stage_owner_approval_gate,
+            self._stage_dispatch_to_llm,
+        ]:
+            stage(ctx)
+            if ctx.abort:
+                return
+
+    # ------------------------------------------------------------------
+    # Pipeline stages
+    # ------------------------------------------------------------------
+
+    def _stage_init_and_dedup(self, ctx: CommandContext) -> None:
+        """Set PROCESSING, reject duplicates, extend dialog timeout."""
         self._set_state(DialogueState.PROCESSING)
-        
-        kiwi_log("KIWI", f"Услышала: {command}", level="INFO")
-        
-        current_time = time.time()
-        if command == self._last_command and (current_time - self._last_command_time) < self._command_cooldown:
+
+        kiwi_log("KIWI", f"Услышала: {ctx.command}", level="INFO")
+
+        ctx.timestamp = time.time()
+        if ctx.command == self._last_command and (ctx.timestamp - self._last_command_time) < self._command_cooldown:
             kiwi_log("DEDUP", f"Ignoring duplicate command within {self._command_cooldown}s", level="INFO")
-            # === STATE MACHINE: Возврат в IDLE ===
             self._set_state(DialogueState.IDLE)
+            ctx.abort = True
             return
-        
-        self._last_command = command
-        self._last_command_time = current_time
-        
+
+        self._last_command = ctx.command
+        self._last_command_time = ctx.timestamp
+
         # Продлеваем dialog mode на время обработки
         if self.listener.dialog_mode:
             self.listener.dialog_until = time.time() + self.listener.dialog_timeout
             kiwi_log("DIALOG", "Extended timeout for processing", level="INFO")
-        
-        command_lower = command.lower().strip()
 
+        ctx.command_lower = ctx.command.lower().strip()
+
+    def _stage_resolve_speaker(self, ctx: CommandContext) -> None:
+        """Get speaker meta, log, show owner warning once."""
         speaker_meta = self._get_current_speaker_meta()
-        speaker_id = str(speaker_meta.get("speaker_id", "unknown"))
-        speaker_name = str(speaker_meta.get("speaker_name", "Незнакомец"))
-        speaker_conf = float(speaker_meta.get("confidence", 0.0))
-        speaker_music = float(speaker_meta.get("music_probability", 0.0))
-        is_owner = self._is_owner_speaker(speaker_meta)
-        owner_profile_ready = self._owner_profile_registered()
+        ctx.speaker_id = str(speaker_meta.get("speaker_id", "unknown"))
+        ctx.speaker_name = str(speaker_meta.get("speaker_name", "Незнакомец"))
+        ctx.speaker_confidence = float(speaker_meta.get("confidence", 0.0))
+        ctx.speaker_music_prob = float(speaker_meta.get("music_probability", 0.0))
+        ctx.is_owner = self._is_owner_speaker(speaker_meta)
+        ctx.owner_profile_ready = self._owner_profile_registered()
 
         kiwi_log(
             "SPEAKER",
-            f"command from {speaker_name} ({speaker_id}), "
-            f"owner={is_owner}, conf={speaker_conf:.2f}, music={speaker_music:.2f}",
+            f"command from {ctx.speaker_name} ({ctx.speaker_id}), "
+            f"owner={ctx.is_owner}, conf={ctx.speaker_confidence:.2f}, music={ctx.speaker_music_prob:.2f}",
             level="INFO",
         )
 
-        if not owner_profile_ready and not self._owner_profile_warning_shown:
+        if not ctx.owner_profile_ready and not self._owner_profile_warning_shown:
             kiwi_log(
                 "APPROVAL",
                 f"Owner profile '{self._owner_id}' is not registered yet. "
@@ -1274,6 +1321,8 @@ class KiwiServiceOpenClaw:
             )
             self._owner_profile_warning_shown = True
 
+    def _stage_check_approval(self, ctx: CommandContext) -> None:
+        """Expire stale approvals, handle owner yes/no."""
         # Очищаем устаревшее pending-одобрение
         if self._pending_owner_approval:
             age = time.time() - float(self._pending_owner_approval.get("timestamp", 0.0))
@@ -1282,40 +1331,41 @@ class KiwiServiceOpenClaw:
                 self._pending_owner_approval = None
 
         # Если есть pending задача и говорит owner — ждём yes/no подтверждение
-        approved_command_from_owner = None
-        fallback_owner_phrase = (not owner_profile_ready) and (self._owner_name.lower() in command_lower)
-        if self._pending_owner_approval and (is_owner or fallback_owner_phrase):
-            if self._approval_yes(command_lower):
-                approved_command_from_owner = str(self._pending_owner_approval.get("command", "")).strip()
+        fallback_owner_phrase = (not ctx.owner_profile_ready) and (self._owner_name.lower() in ctx.command_lower)
+        if self._pending_owner_approval and (ctx.is_owner or fallback_owner_phrase):
+            if self._approval_yes(ctx.command_lower):
+                ctx.approved_command_from_owner = str(self._pending_owner_approval.get("command", "")).strip()
                 requester = str(self._pending_owner_approval.get("speaker_name", "кто-то"))
                 self._pending_owner_approval = None
-                if approved_command_from_owner:
+                if ctx.approved_command_from_owner:
                     kiwi_log("APPROVAL", f"Approved by owner. Running deferred command from {requester}", level="INFO")
                     self.speak(f"Принято. Выполняю запрос от {requester}.", style="confident")
-                    command = approved_command_from_owner
-                    command_lower = command.lower().strip()
-            elif self._approval_no(command_lower):
+                    ctx.command = ctx.approved_command_from_owner
+                    ctx.command_lower = ctx.command.lower().strip()
+            elif self._approval_no(ctx.command_lower):
                 requester = str(self._pending_owner_approval.get("speaker_name", "кто-то"))
                 self._pending_owner_approval = None
                 kiwi_log("APPROVAL", f"Denied by owner. Requester={requester}", level="INFO")
                 self.speak(f"Хорошо, запрос от {requester} отклонён.", style="calm")
-                return
-        
-        # === СПЕЦИАЛЬНЫЕ КОМАНДЫ (выполняем сразу, без фильтров) ===
-        stop_words = ['стоп', 'отмена', 'хватит', 'прекрати', 'остановись', 'стой', 'cancel', 'stop']
+                ctx.abort = True
+
+    def _stage_handle_special_commands(self, ctx: CommandContext) -> None:
+        """Reset context, calibrate, voice profile commands."""
         calibrate_words = ['калибровка', 'калибруй', 'перекалибруй', 'обнови профиль']
         reset_prompt_words = ['сбрось контекст', 'новый разговор', 'забудь', 'сбрось системный промпт']
-        
-        if any(word in command_lower for word in reset_prompt_words):
+
+        if any(word in ctx.command_lower for word in reset_prompt_words):
             kiwi_log("KIWI", "Resetting system prompt...", level="INFO")
             self._system_prompt_sent = False
             self.speak("Контекст сброшен. Начинаем новый разговор.", style="neutral")
+            ctx.abort = True
             return
-        
-        if any(word in command_lower for word in calibrate_words):
+
+        if any(word in ctx.command_lower for word in calibrate_words):
             kiwi_log("KIWI", "Speaker ID calibration requested", level="INFO")
             self._self_profile_created = False
             self.speak("Калибрую распознавание голоса.", style="neutral")
+            ctx.abort = True
             return
 
         # === КОМАНДЫ УПРАВЛЕНИЯ ГОЛОСОВЫМИ ПРОФИЛЯМИ ===
@@ -1328,7 +1378,7 @@ class KiwiServiceOpenClaw:
         _on = self._owner_name.lower()
         if _on and _on != "owner":
             owner_register_words.extend([f"это {_on}", f"я {_on}"])
-        if any(word in command_lower for word in owner_register_words):
+        if any(word in ctx.command_lower for word in owner_register_words):
             if hasattr(self.listener, "register_owner_voice"):
                 success = self.listener.register_owner_voice(self._owner_name)
                 if success:
@@ -1337,26 +1387,30 @@ class KiwiServiceOpenClaw:
                     self.speak("Не получилось сохранить профиль. Скажи фразу подлиннее и попробуй снова.", style="calm")
             else:
                 self.speak("Модуль профилей сейчас недоступен.", style="calm")
+            ctx.abort = True
             return
 
-        if "кто говорит" in command_lower or "кто это говорит" in command_lower:
+        if "кто говорит" in ctx.command_lower or "кто это говорит" in ctx.command_lower:
             if hasattr(self.listener, "describe_last_speaker"):
                 self.speak(self.listener.describe_last_speaker(), style="neutral")
             else:
                 self.speak("Сейчас не могу определить говорящего.", style="calm")
+            ctx.abort = True
             return
 
-        if "какие голоса" in command_lower or "список голосов" in command_lower:
+        if "какие голоса" in ctx.command_lower or "список голосов" in ctx.command_lower:
             if hasattr(self.listener, "describe_known_voices"):
                 self.speak(self.listener.describe_known_voices(), style="neutral")
             else:
                 self.speak("Список голосов недоступен.", style="calm")
+            ctx.abort = True
             return
 
-        if "запомни меня как" in command_lower or "это мой друг" in command_lower:
-            name = self._extract_name_from_voice_command(command)
+        if "запомни меня как" in ctx.command_lower or "это мой друг" in ctx.command_lower:
+            name = self._extract_name_from_voice_command(ctx.command)
             if not name:
                 self.speak("Скажи имя после фразы: запомни меня как ...", style="neutral")
+                ctx.abort = True
                 return
             if hasattr(self.listener, "remember_last_voice_as"):
                 success, _sid = self.listener.remember_last_voice_as(name)
@@ -1366,50 +1420,58 @@ class KiwiServiceOpenClaw:
                     self.speak("Не удалось сохранить голос. Нужна более чёткая фраза.", style="calm")
             else:
                 self.speak("Модуль профилей сейчас недоступен.", style="calm")
+            ctx.abort = True
             return
-        
-        if any(word in command_lower for word in stop_words):
-            kiwi_log("KIWI", "Получена команда отмены!", level="INFO")
 
-            tts_was_active = self.is_speaking() or self._is_streaming or self._streaming_tts_manager is not None
-            openclaw_was_processing = self.openclaw.is_processing()
-
-            if tts_was_active:
-                self.request_barge_in()
-                self._streaming_stop_event.set()
-                self._stop_stream_watchdog()
-                if self._streaming_tts_manager:
-                    self._streaming_tts_manager.stop(graceful=False)
-                    self._streaming_tts_manager = None
-
-            cancelled = self.openclaw.cancel() if openclaw_was_processing else False
-
-            if tts_was_active:
-                # Пользователь попросил "стой" во время речи:
-                # молча прерываем и возвращаемся в режим ожидания новой команды.
-                self._is_streaming = False
-                self.listener.activate_dialog_mode()
-                self._set_state(DialogueState.LISTENING)
-                self._start_idle_timer()
-                return
-
-            if cancelled:
-                self.speak("Остановила.", style="calm")
-            else:
-                self.speak("Нечего останавливать.", style="neutral")
+    def _stage_handle_stop_cancel(self, ctx: CommandContext) -> None:
+        """Stop TTS + barge-in, cancel OpenClaw."""
+        stop_words = ['стоп', 'отмена', 'хватит', 'прекрати', 'остановись', 'стой', 'cancel', 'stop']
+        if not any(word in ctx.command_lower for word in stop_words):
             return
-        
-        # === БЫСТРАЯ ПРОВЕРКА COMPLETENESS (локально) ===
-        combined_text = command
+
+        kiwi_log("KIWI", "Получена команда отмены!", level="INFO")
+
+        tts_was_active = self.is_speaking() or self._is_streaming or self._streaming_tts_manager is not None
+        openclaw_was_processing = self.openclaw.is_processing()
+
+        if tts_was_active:
+            self.request_barge_in()
+            self._streaming_stop_event.set()
+            self._stop_stream_watchdog()
+            if self._streaming_tts_manager:
+                self._streaming_tts_manager.stop(graceful=False)
+                self._streaming_tts_manager = None
+
+        cancelled = self.openclaw.cancel() if openclaw_was_processing else False
+
+        if tts_was_active:
+            # Пользователь попросил "стой" во время речи:
+            # молча прерываем и возвращаемся в режим ожидания новой команды.
+            self._is_streaming = False
+            self.listener.activate_dialog_mode()
+            self._set_state(DialogueState.LISTENING)
+            self._start_idle_timer()
+            ctx.abort = True
+            return
+
+        if cancelled:
+            self.speak("Остановила.", style="calm")
+        else:
+            self.speak("Нечего останавливать.", style="neutral")
+        ctx.abort = True
+
+    def _stage_completeness_check(self, ctx: CommandContext) -> None:
+        """Combine pending phrase, check completeness."""
+        combined_text = ctx.command
         if self._pending_phrase:
             elapsed = time.time() - self._pending_timestamp
             if elapsed < self._pending_timeout:
-                combined_text = f"{self._pending_phrase} {command}".strip()
-                kiwi_log("KIWI", f"Combined with pending: '{self._pending_phrase}' + '{command}' → '{combined_text}'", level="INFO")
+                combined_text = f"{self._pending_phrase} {ctx.command}".strip()
+                kiwi_log("KIWI", f"Combined with pending: '{self._pending_phrase}' + '{ctx.command}' → '{combined_text}'", level="INFO")
             else:
                 kiwi_log("KIWI", f"Pending phrase expired ({elapsed:.1f}s)", level="INFO")
                 self._pending_phrase = ""
-        
+
         # Быстрая локальная проверка completeness
         quick_complete = self._quick_completeness_check(combined_text)
         if quick_complete:
@@ -1422,65 +1484,69 @@ class KiwiServiceOpenClaw:
             if self.listener.dialog_mode:
                 self.listener.dialog_until = time.time() + self._pending_timeout
                 kiwi_log("DIALOG", f"Extended timeout for pending phrase ({self._pending_timeout}s)", level="INFO")
+            ctx.abort = True
             return
-        
+
         # Фраза complete - сбрасываем pending и отправляем в OpenClaw
         self._pending_phrase = ""
-        command = combined_text
-        command_lower = command.lower().strip()
+        ctx.command = combined_text
+        ctx.command_lower = ctx.command.lower().strip()
 
-        # === OWNER APPROVAL: задачи от не-owner требуют подтверждения Рамиля ===
+    def _stage_owner_approval_gate(self, ctx: CommandContext) -> None:
+        """Defer non-owner actionable tasks."""
         if (
-            not approved_command_from_owner
-            and not is_owner
-            and self._looks_like_actionable_task(command_lower)
-            and not self._is_small_talk_or_safe_request(command_lower)
+            not ctx.approved_command_from_owner
+            and not ctx.is_owner
+            and self._looks_like_actionable_task(ctx.command_lower)
+            and not self._is_small_talk_or_safe_request(ctx.command_lower)
         ):
             self._pending_owner_approval = {
-                "command": command,
-                "speaker_id": speaker_id,
-                "speaker_name": speaker_name,
+                "command": ctx.command,
+                "speaker_id": ctx.speaker_id,
+                "speaker_name": ctx.speaker_name,
                 "timestamp": time.time(),
             }
-            kiwi_log("APPROVAL", f"Pending owner approval for speaker={speaker_name}, command='{command}'", level="INFO")
+            kiwi_log("APPROVAL", f"Pending owner approval for speaker={ctx.speaker_name}, command='{ctx.command}'", level="INFO")
             approve_hint = "Скажи: разрешаю или запрещаю."
-            if not owner_profile_ready:
+            if not ctx.owner_profile_ready:
                 approve_hint = f"Скажи: {self._owner_name}, разрешаю. Или: {self._owner_name}, запрещаю."
             self.speak(
-                f"{self._owner_name}, {speaker_name} просит: {command}. "
+                f"{self._owner_name}, {ctx.speaker_name} просит: {ctx.command}. "
                 f"{approve_hint}",
                 style="neutral",
             )
             self.listener.activate_dialog_mode()
             self._set_state(DialogueState.LISTENING)
-            return
-        
+            ctx.abort = True
+
+    def _stage_dispatch_to_llm(self, ctx: CommandContext) -> None:
+        """Event, beep, THINKING, streaming/blocking dispatch."""
         # Публикуем событие получения команды
         if EVENT_BUS_AVAILABLE:
             from kiwi.event_bus import EventType
             get_event_bus().publish(
                 EventType.COMMAND_RECEIVED,
-                {'command': command, 'source': 'voice'},
+                {'command': ctx.command, 'source': 'voice'},
                 source='kiwi_service'
             )
-        
+
         # Запускаем beep асинхронно
         self.play_beep(async_mode=True)
-        
+
         # === ОБРАБОТКА КОМАНДЫ ===
         kiwi_log("KIWI", "Думаю...", level="INFO")
-        
+
         # === STATE MACHINE: Переход в THINKING ===
         self._set_state(DialogueState.THINKING)
-        
+
         # Продлеваем dialog mode на время ожидания ответа от LLM
         if self.listener.dialog_mode:
             self.listener.dialog_until = time.time() + self.config.openclaw_timeout + 10
             kiwi_log("DIALOG", f"Extended timeout for LLM response ({self.config.openclaw_timeout + 10}s)", level="INFO")
-        
+
         # Определяем эмоцию заранее (до начала стриминга)
-        self._streaming_style = self._detect_emotion(command, "")
-        
+        self._streaming_style = self._detect_emotion(ctx.command, "")
+
         # === STREAMING FLOW (WebSocket) или CLASSIC FLOW (blocking final response) ===
         local_qwen_no_streaming = (
             self.tts_provider == "qwen3" and self.tts_qwen_backend == "local"
@@ -1492,80 +1558,88 @@ class KiwiServiceOpenClaw:
         )
 
         if use_streaming_flow:
-            # Streaming: запускаем TTS manager и отправляем сообщение
-            kiwi_log("KIWI", "Using streaming LLM + TTS", level="INFO")
-            with self._streaming_completion_lock:
-                self._streaming_generation += 1
-            self._streaming_response_playback_started = False
-            
-            # Отменяем предыдущий запрос к OpenClaw если он ещё выполняется
-            if self.openclaw.is_processing():
-                kiwi_log("KIWI", "Cancelling previous OpenClaw request", level="INFO")
-                self.openclaw.cancel()
-            self._start_streaming_runtime(command)
-            
-            # Отправляем сообщение с системным промтом как контекст ТОЛЬКО при первом запросе
-            # Это "задаёт" системный промт для сессии
-            if not self._system_prompt_sent:
-                kiwi_log("KIWI", "Sending first message with system prompt", level="INFO")
-                success = self.openclaw.send_message(
-                    command, 
-                    context=self.config.voice_system_prompt
-                )
-                self._system_prompt_sent = True
-            else:
-                success = self.openclaw.send_message(command)
-            
-            if not success:
-                kiwi_log("KIWI", "Failed to send message via WebSocket", level="ERROR")
-                self._stop_stream_watchdog()
-                self._streaming_tts_manager.stop(graceful=False)
-                self._streaming_tts_manager = None
-                if self._task_status_announcer:
-                    self._task_status_announcer.stop()
-                    self._task_status_announcer = None
-                self.speak("Извини, не удалось отправить сообщение.", style="calm")
-                self._set_state(DialogueState.IDLE)
-            else:
-                self._start_stream_watchdog(command)
+            self._dispatch_streaming(ctx)
         else:
+            self._dispatch_blocking(ctx, local_qwen_no_streaming)
+
+    # ------------------------------------------------------------------
+    # Dispatch helpers (called from _stage_dispatch_to_llm)
+    # ------------------------------------------------------------------
+
+    def _dispatch_streaming(self, ctx: CommandContext) -> None:
+        """Streaming: launch TTS manager and send message via WebSocket."""
+        kiwi_log("KIWI", "Using streaming LLM + TTS", level="INFO")
+        with self._streaming_completion_lock:
+            self._streaming_generation += 1
+        self._streaming_response_playback_started = False
+
+        # Отменяем предыдущий запрос к OpenClaw если он ещё выполняется
+        if self.openclaw.is_processing():
+            kiwi_log("KIWI", "Cancelling previous OpenClaw request", level="INFO")
+            self.openclaw.cancel()
+        self._start_streaming_runtime(ctx.command)
+
+        # Отправляем сообщение с системным промтом как контекст ТОЛЬКО при первом запросе
+        # Это "задаёт" системный промт для сессии
+        if not self._system_prompt_sent:
+            kiwi_log("KIWI", "Sending first message with system prompt", level="INFO")
+            success = self.openclaw.send_message(
+                ctx.command,
+                context=self.config.voice_system_prompt
+            )
+            self._system_prompt_sent = True
+        else:
+            success = self.openclaw.send_message(ctx.command)
+
+        if not success:
+            kiwi_log("KIWI", "Failed to send message via WebSocket", level="ERROR")
             self._stop_stream_watchdog()
-            # Blocking flow:
-            # - всегда для CLI;
-            # - для WebSocket тоже, если локальный Qwen TTS (более стабильный режим).
-            if self._use_websocket and hasattr(self.openclaw, "chat"):
-                if local_qwen_no_streaming:
-                    kiwi_log("KIWI", "Streaming TTS disabled for local Qwen; using blocking final response", level="INFO")
-                else:
-                    kiwi_log("KIWI", "Using blocking flow (WebSocket mode)", level="INFO")
+            self._streaming_tts_manager.stop(graceful=False)
+            self._streaming_tts_manager = None
+            if self._task_status_announcer:
+                self._task_status_announcer.stop()
+                self._task_status_announcer = None
+            self.speak("Извини, не удалось отправить сообщение.", style="calm")
+            self._set_state(DialogueState.IDLE)
+        else:
+            self._start_stream_watchdog(ctx.command)
+
+    def _dispatch_blocking(self, ctx: CommandContext, local_qwen_no_streaming: bool) -> None:
+        """Blocking flow: CLI or WebSocket without streaming TTS."""
+        self._stop_stream_watchdog()
+        if self._use_websocket and hasattr(self.openclaw, "chat"):
+            if local_qwen_no_streaming:
+                kiwi_log("KIWI", "Streaming TTS disabled for local Qwen; using blocking final response", level="INFO")
             else:
-                kiwi_log("KIWI", "Using classic blocking flow (CLI mode)", level="INFO")
-            
-            # Для blocking-flow добавляем системный промт к первому сообщению
-            if not self._system_prompt_sent:
-                full_command = f"{self.config.voice_system_prompt}\n\n{command}"
-                self._system_prompt_sent = True
-                kiwi_log("KIWI", "System prompt added to first message", level="INFO")
-            else:
-                full_command = command
-            
-            response = self.openclaw.chat(full_command)
-            
-            # Нормализация ответа
-            if isinstance(response, list):
-                response = "".join(str(r) for r in response)
-            
-            # Если ответ [SILENCE] - не говорим вслух
-            if response and response.strip().upper() == "[SILENCE]":
-                kiwi_log("KIWI", "Silenced response (likely noise/incomplete)", level="INFO")
-                self.listener.dialog_mode = False
-                self._set_state(DialogueState.IDLE)
-                return
-            
-            if response:
-                kiwi_log("KIWI", f"Ответ: {response[:100]}...", level="INFO")
-                style = self._detect_emotion(command, response)
-                self.speak(response, style=style)
+                kiwi_log("KIWI", "Using blocking flow (WebSocket mode)", level="INFO")
+        else:
+            kiwi_log("KIWI", "Using classic blocking flow (CLI mode)", level="INFO")
+
+        # Для blocking-flow добавляем системный промт к первому сообщению
+        if not self._system_prompt_sent:
+            full_command = f"{self.config.voice_system_prompt}\n\n{ctx.command}"
+            self._system_prompt_sent = True
+            kiwi_log("KIWI", "System prompt added to first message", level="INFO")
+        else:
+            full_command = ctx.command
+
+        response = self.openclaw.chat(full_command)
+
+        # Нормализация ответа
+        if isinstance(response, list):
+            response = "".join(str(r) for r in response)
+
+        # Если ответ [SILENCE] - не говорим вслух
+        if response and response.strip().upper() == "[SILENCE]":
+            kiwi_log("KIWI", "Silenced response (likely noise/incomplete)", level="INFO")
+            self.listener.dialog_mode = False
+            self._set_state(DialogueState.IDLE)
+            return
+
+        if response:
+            kiwi_log("KIWI", f"Ответ: {response[:100]}...", level="INFO")
+            style = self._detect_emotion(ctx.command, response)
+            self.speak(response, style=style)
     
     def _quick_completeness_check(self, text: str) -> bool:
         """

@@ -507,4 +507,62 @@ class EventBus:
 
 ---
 
+### ✅ FIX: VAD Sensitivity & Noise Recalibration (2026-02-16)
+
+**Проблема:** Kiwi перестаёт слышать речь или обрезает фразы на середине.
+
+**Корневая причина:**
+1. Noise floor калибруется один раз при старте. Если при старте был шум, `_silence_threshold` залипает навсегда (наблюдалось: thr=0.0853, а реальный фон 0.0003)
+2. Речь пользователя (vol=0.02-0.04) ниже порога (0.0853) — энергетический VAD считает её тишиной
+3. VAD continuation check (строка 1477) требовал `volume >= _silence_threshold`, поэтому Silero VAD не мог продлить запись при тихой речи
+4. Energy gate (0.012) отбрасывал записи с тихим голосом (rms=0.0107)
+5. `silence_duration_end=1.5s` обрезал фразы слишком рано при средней длине речи
+
+**Решение:**
+1. **Непрерывная рекалибровка** — каждые ~30s тишины пересчитывает noise floor из реальных ambient сэмплов
+2. **VAD continuation fix** — условие заменено с `_silence_threshold` на `effective_min_speech_volume` (обычно ~0.006-0.015), позволяя Silero VAD продлять запись тихой речи
+3. **Energy gate снижен** — 0.012 → 0.006
+4. **Config tuning** — `noise_threshold_multiplier` 1.5→1.3, `min_silence_threshold` 0.008→0.005, `silence_duration_end` 1.5→1.8
+
+**Файлы:**
+- `config.yaml` — VAD параметры
+- `kiwi/listener.py` — рекалибровка, VAD continuation, energy gate, VAD override, noisereduce import
+- `kiwi/unified_vad.py` — `energy_min_threshold` 0.004→0.008
+
+---
+
+### ✅ FEATURE: Device Identity & Session Isolation (2026-02-16)
+
+**Проблема:** Gateway не различает устройства; события от чужих сессий обрабатывались Kiwi.
+
+**Решение:**
+1. **Ed25519 device identity** — генерируется при первом запуске, сохраняется в `device-identity.json`. Подписывает connect request (v2 payload)
+2. **Session key filtering** — `_handle_lifecycle_event` и `_handle_chat_event` игнорируют события от чужих sessionKey
+
+**Файлы:**
+- `kiwi/openclaw_ws.py` — device auth, session filtering
+- `.gitignore` — `device-identity.json` (приватный ключ)
+- `requirements.txt` — `cryptography>=41.0.0`
+
+---
+
+### ✅ REFACTOR: Command Pipeline & Audio Stability (2026-02-16)
+
+**Изменения:**
+1. **CommandContext dataclass** — состояние команды (speaker, approval, abort) передаётся через stages вместо локальных переменных в 300-строчном `_on_wake_word`
+2. **Pipeline stages** — `_on_wake_word` разбит на 8 стадий (`_stage_init_and_dedup`, `_stage_resolve_speaker`, `_stage_check_approval`, `_stage_handle_special_commands`, `_stage_handle_stop_cancel`, `_stage_completeness_check`, `_stage_owner_approval_gate`, `_stage_dispatch_to_llm`)
+3. **`_sd_play_lock`** — защита от concurrent `sd.play()` вызовов (race между status announcer и response TTS)
+4. **`_speak_chunk` guard** — не запускает synthesis если response уже играет
+5. **Streaming TTS stop fix** — упрощена логика final chunk в `StreamingTTSManager.stop()`
+6. **Whisper `no_speech_threshold`** — 0.6→0.85 (меньше ложных отклонений тихой речи)
+7. **Noise reduction** — добавлен `noisereduce` (spectral gating, `prop_decrease=0.4`) для очистки аудио перед Whisper
+
+**Файлы:**
+- `kiwi/service.py` — CommandContext, pipeline, sd_play_lock, speak_chunk guard
+- `kiwi/tts/streaming.py` — final chunk fix
+- `kiwi/listener.py` — noisereduce, no_speech_threshold
+- `requirements.txt` — `noisereduce>=3.0.0`
+
+---
+
 *Дополнить при реализации Phases.*
