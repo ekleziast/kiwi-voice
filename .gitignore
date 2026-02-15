@@ -1,0 +1,43 @@
+# Environment & secrets
+.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+
+# Models (large binary files)
+models/
+
+# Voice profiles (user data)
+voice_profiles/
+
+# TTS cache
+tts_cache/
+
+# Piper models (large binary files)
+piper-models/
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# Claude Code (personal workspace data)
+.claude/
+
+# Test / OS caches
+.pytest_cache/
+Thumbs.db
+.DS_Store

@@ -1,0 +1,205 @@
+# Kiwi Voice Assistant Configuration
+# Precedence: config.yaml → .env → hardcoded defaults
+
+# ---------------------------------------------------------------------------
+# WebSocket (OpenClaw Gateway v3)
+# ---------------------------------------------------------------------------
+# Token читается автоматически из ~/.openclaw/openclaw.json
+websocket:
+  enabled: true
+  host: "127.0.0.1"
+  port: 18789
+  reconnect_interval: 3.0
+  max_reconnect_attempts: 10
+
+# ---------------------------------------------------------------------------
+# LLM
+# ---------------------------------------------------------------------------
+llm:
+  model: "openai/gpt-5.2"
+  chat_timeout: 120
+  stream_stall_timeout: 12
+  stream_stall_retry_max: 1
+  retry_max: 3
+  retry_delays: [0.5, 1.0, 2.0]
+
+# ---------------------------------------------------------------------------
+# TTS
+# ---------------------------------------------------------------------------
+tts:
+  # provider: elevenlabs | piper | qwen3
+  provider: "elevenlabs"
+
+  # Qwen3-TTS settings (provider=qwen3)
+  qwen_backend: "local"            # runpod | local
+  voice: "Ono_Anna"                # Vivian, Serena, Uncle_Fu, Dylan, Eric, Ryan, Aiden, Ono_Anna, Sohee
+  model_size: "0.6B"               # 0.6B | 1.7B
+  default_style: "neutral"
+  local_model_path: "./models/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+  local_tokenizer_path: "./models/Qwen3-TTS-Tokenizer-12Hz"
+  qwen_device: "cuda"              # auto | cpu | cuda
+
+  # Piper settings (provider=piper)
+  piper_model_path: "./piper-models/ru_RU-irina-medium.onnx"
+
+  # ElevenLabs settings (provider=elevenlabs)
+  # API key: .env → KIWI_ELEVENLABS_API_KEY
+  elevenlabs:
+    voice_id: "aEO01A4wXwd1O8GPgGlF"   # Arabella
+    # Alternatives:
+    # - VD1if7jDVYtAKs4P0FIY | Milly Maple
+    # - NhY0kyTmsKuEpHvDMngm | Nataly
+    # - WAhoMTNdLdMoq1j3wf3I | Hope
+    model_id: "eleven_multilingual_v2"
+    output_format: "mp3_44100_128"
+    use_streaming_endpoint: true
+    optimize_streaming_latency: 3
+    stability: 0.45
+    similarity_boost: 0.75
+    style: 0.25
+    use_speaker_boost: true
+    speed: 1.0
+    style_presets:
+      neutral:    { stability: 0.45, style: 0.25, speed: 1.00 }
+      excited:    { stability: 0.45, style: 0.25, speed: 1.00 }
+      calm:       { stability: 0.45, style: 0.25, speed: 1.00 }
+      confident:  { stability: 0.45, style: 0.25, speed: 1.00 }
+      whisper:    { stability: 0.45, style: 0.25, speed: 1.00 }
+      sad:        { stability: 0.45, style: 0.25, speed: 1.00 }
+      angry:      { stability: 0.45, style: 0.25, speed: 1.00 }
+      playful:    { stability: 0.45, style: 0.25, speed: 1.00 }
+      serious:    { stability: 0.45, style: 0.25, speed: 1.00 }
+      cheerful:   { stability: 0.45, style: 0.25, speed: 1.00 }
+
+  # RunPod serverless (qwen_backend=runpod)
+  # Keys: .env → RUNPOD_TTS_ENDPOINT_ID, RUNPOD_API_KEY
+  timeout: 60
+  poll_interval: 0.3
+
+# ---------------------------------------------------------------------------
+# STT (Faster Whisper)
+# ---------------------------------------------------------------------------
+stt:
+  model: "large"
+  device: "cuda"
+  compute_type: "float16"
+  language: "ru"
+
+# ---------------------------------------------------------------------------
+# Wake Word
+# ---------------------------------------------------------------------------
+wake_word:
+  keyword: "киви"
+  position_limit: 3
+
+# ---------------------------------------------------------------------------
+# Audio
+# ---------------------------------------------------------------------------
+audio:
+  sample_rate: 24000               # TTS output
+  input_sample_rate: 16000         # Microphone
+  output_device: null
+  input_device: null
+
+# ---------------------------------------------------------------------------
+# Realtime / VAD
+# ---------------------------------------------------------------------------
+realtime:
+  chunk_duration: 0.3
+
+  # Noise calibration
+  noise_sample_duration: 2.0
+  noise_threshold_multiplier: 1.5
+  min_silence_threshold: 0.008
+
+  # Speech detection
+  min_speech_duration: 0.3
+  max_speech_duration: 30.0
+  silence_duration_end: 1.5
+  min_speech_volume: 0.015
+  post_tts_dead_zone: 2.5
+
+  # Barge-in
+  barge_in_chunks_required: 3
+  barge_in_volume_multiplier: 3.5
+  barge_in_min_volume: 0.025
+  barge_in_grace_period: 0.35
+
+  # Adaptive pause (longer speech → longer allowed pause)
+  silence_duration_long_speech: 2.0
+  silence_duration_monologue: 2.5
+  long_speech_threshold: 3.0
+  monologue_threshold: 10.0
+
+  # VAD-assisted end-of-speech
+  vad_end_speech_check: true
+  vad_end_speech_frames: 5
+  vad_continuation_threshold: 3
+  vad_continuation_bonus_chunks: 5
+
+  # TTS cache
+  cache_enabled: true
+  cache_size: 100
+  cache_ttl: 3600
+
+  # Streaming transcription
+  streaming:
+    enabled: true
+    chunk_interval: 1.5
+    min_audio_for_stream: 1.0
+    early_wake_threshold: 0.7
+
+  owner_handsfree:
+    enabled: false
+    guest_cooldown_sec: 180
+
+# ---------------------------------------------------------------------------
+# Voice Security
+# ---------------------------------------------------------------------------
+# Telegram tokens: .env → KIWI_TELEGRAM_BOT_TOKEN, KIWI_TELEGRAM_CHAT_ID
+security:
+  telegram_approval_enabled: true
+  owner_control_commands:
+    block_last: ["в чёрный список", "заблокируй", "запрети", "блокируй"]
+    unblock_last: ["разблокируй", "убери из чёрного списка", "вычеркни"]
+    add_friend: ["запомни меня как", "это мой друг", "запомни"]
+    forget_speaker: ["забудь этот голос", "удали профиль"]
+    identify: ["кто говорит", "кто это"]
+    list_voices: ["какие голоса", "список голосов"]
+  auto_learn_enabled: true
+  auto_learn_threshold: 0.85
+  identify_threshold: 0.70
+  context_timeout: 30
+
+# ---------------------------------------------------------------------------
+# Speaker Priority
+# ---------------------------------------------------------------------------
+speaker_priority:
+  owner:
+    id: "owner"
+    name: "Owner"  # Имя владельца (отображается в голосовых ответах)
+    priority: 0
+    auto_block: false
+  hot_cache_size: 10
+  hot_cache_ttl: 300
+
+# ---------------------------------------------------------------------------
+# Dangerous Command Patterns
+# ---------------------------------------------------------------------------
+dangerous_commands:
+  critical:
+    - "удали все файлы"
+    - "delete all files"
+    - "format c:"
+    - "выключи компьютер"
+    - "shutdown now"
+    - "sudo rm -rf"
+    - "отправь пароль"
+  dangerous:
+    - "sudo "
+    - "chmod 777"
+    - "systemctl stop"
+  warning:
+    - "измени настройки"
+    - "открой порты"
+    - "перемести файл"

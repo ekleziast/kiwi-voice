@@ -1,0 +1,478 @@
+#!/usr/bin/env python3
+"""Configuration loader for Kiwi Voice."""
+
+import os
+import re
+from typing import Optional, Dict, Any
+from dataclasses import dataclass, field
+
+from kiwi.utils import kiwi_log
+from kiwi.tts.base import normalize_model_size as normalize_qwen_model_size, normalize_voice as normalize_qwen_voice
+from kiwi.tts.elevenlabs import (
+    normalize_elevenlabs_voice_id,
+    DEFAULT_ELEVENLABS_VOICE_ID,
+    DEFAULT_ELEVENLABS_MODEL_ID,
+    DEFAULT_ELEVENLABS_STYLE_PRESETS,
+)
+
+
+def load_config_yaml(config_path: str = "config.yaml") -> dict:
+    """Загружает конфигурацию из YAML файла."""
+    import yaml
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return yaml.safe_load(f) or {}
+        except Exception as e:
+            kiwi_log("CONFIG", f"Warning: Failed to load {config_path}: {e}", level="WARNING")
+    return {}
+
+
+def check_cuda_available() -> bool:
+    """Проверяет доступность CUDA для Whisper."""
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
+
+@dataclass
+class KiwiConfig:
+    openclaw_bin: str = "openclaw"
+    """Конфигурация сервиса Киви."""
+    openclaw_session_id: str = "kiwi-voice"  # Отдельная сессия для голоса
+    openclaw_agent: Optional[str] = None
+    openclaw_timeout: int = 120
+
+    # Voice system prompt - задаётся при первом подключении
+    voice_system_prompt: str = """Ты — голосовой ассистент Киви.
+
+Правила для голосового режима:
+1. Отвечай кратко, но ЗАВЕРШЁННО. Лучше завершённо, чем неполно.
+2. Будь дружелюбной и эмоциональной
+3. Если нужно выполнить сложную задачу — сделай это, но сообщи о результате кратко
+4. Если выполняешь длительную задачу (>30 секунд) — периодически описывай что делаешь, чтобы пользователь понимал прогресс
+5. Используй общую память с основной сессией (консолью)
+6. Если не уверена — переспроси
+
+Контекст: пользователь говорит голосом, ответ будет озвучен через TTS."""
+
+    # LLM settings
+    llm_model: str = "openrouter/moonshotai/kimi-k2.5"
+    llm_filter_timeout: int = 15
+    llm_filter_subprocess_timeout: int = 20
+    llm_stream_stall_timeout: float = 12.0
+    llm_stream_stall_retry_max: int = 1
+
+    # Retry settings for rate_limit errors
+    llm_retry_max: int = 3
+    llm_retry_delays: list = None
+
+    def __post_init__(self):
+        if self.llm_retry_delays is None:
+            self.llm_retry_delays = [0.5, 1.0, 2.0]
+
+    # WebSocket settings
+    ws_enabled: bool = True
+    ws_port: int = 18789
+    ws_host: str = "localhost"
+    ws_reconnect_interval: float = 3.0
+    ws_max_reconnect_attempts: int = 10
+    ws_ping_interval: float = 30.0
+    ws_ping_timeout: float = 20.0
+
+    # TTS settings
+    # provider: "qwen3" | "piper" | "elevenlabs"
+    # qwen backend: "runpod" | "local"
+    tts_provider: str = "qwen3"
+    tts_qwen_backend: str = "runpod"
+    use_local_tts: bool = False  # legacy compatibility switch
+    tts_endpoint_id: str = ""
+    tts_api_key: str = ""
+    tts_voice: str = "Ono_Anna"
+    tts_model_size: str = "1.7B"
+    tts_default_style: str = "neutral"
+    tts_timeout: int = 60
+    tts_poll_interval: float = 0.3
+    tts_local_model_path: Optional[str] = None
+    tts_local_tokenizer_path: Optional[str] = None
+    tts_qwen_device: str = "auto"
+    tts_piper_model_path: Optional[str] = None
+    tts_elevenlabs_api_key: str = ""
+    tts_elevenlabs_voice_id: str = DEFAULT_ELEVENLABS_VOICE_ID
+    tts_elevenlabs_model_id: str = DEFAULT_ELEVENLABS_MODEL_ID
+    tts_elevenlabs_output_format: str = "mp3_44100_128"
+    tts_elevenlabs_use_streaming_endpoint: bool = True
+    tts_elevenlabs_optimize_streaming_latency: int = 3
+    tts_elevenlabs_stability: float = 0.45
+    tts_elevenlabs_similarity_boost: float = 0.75
+    tts_elevenlabs_style: float = 0.25
+    tts_elevenlabs_use_speaker_boost: bool = True
+    tts_elevenlabs_speed: float = 1.0
+    tts_elevenlabs_style_presets: Dict[str, Dict[str, float]] = field(
+        default_factory=lambda: {
+            style_name: dict(style_values)
+            for style_name, style_values in DEFAULT_ELEVENLABS_STYLE_PRESETS.items()
+        }
+    )
+
+    stt_model: str = "base"
+    stt_device: str = "cpu"
+    stt_compute_type: str = "int8"
+    stt_language: str = "ru"
+
+    sample_rate: int = 24000
+    output_device: Optional[str] = None
+    wake_word_keyword: str = "киви"
+    wake_word_position_limit: int = 3
+
+    # Owner name (from speaker_priority.owner.name in config.yaml)
+    owner_name: str = "Owner"
+
+    @staticmethod
+    def _sync_local_qwen_model_path(model_path: Optional[str], model_size: str) -> str:
+        """Keep local Qwen path aligned with selected model size."""
+        normalized_size = normalize_qwen_model_size(model_size)
+        if not model_path:
+            return f"./models/Qwen3-TTS-12Hz-{normalized_size}-CustomVoice"
+
+        path = str(model_path).strip()
+        pattern = r"(Qwen3-TTS-12Hz-)(0\.6B|1\.7B)(-CustomVoice)"
+        if re.search(pattern, path):
+            return re.sub(pattern, rf"\g<1>{normalized_size}\g<3>", path)
+        return path
+
+    @classmethod
+    def from_yaml(cls, yaml_config: dict) -> "KiwiConfig":
+        """Создает конфиг из YAML + env vars."""
+        config = cls()
+
+        stt_cfg = yaml_config.get("stt", {})
+        tts_cfg = yaml_config.get("tts", {})
+        eleven_cfg = tts_cfg.get("elevenlabs", {}) if isinstance(tts_cfg.get("elevenlabs", {}), dict) else {}
+        audio_cfg = yaml_config.get("audio", {})
+        wake_cfg = yaml_config.get("wake_word", {})
+        llm_cfg = yaml_config.get("llm", {})
+        ws_cfg = yaml_config.get("websocket", {})
+
+        config.stt_model = stt_cfg.get("model", config.stt_model)
+        config.stt_device = stt_cfg.get("device", config.stt_device)
+        config.stt_compute_type = stt_cfg.get("compute_type", config.stt_compute_type)
+        config.stt_language = stt_cfg.get("language", config.stt_language)
+
+        raw_use_local_tts = tts_cfg.get("use_local_tts", config.use_local_tts)
+        if isinstance(raw_use_local_tts, str):
+            config.use_local_tts = raw_use_local_tts.strip().lower() in ("true", "1", "yes")
+        else:
+            config.use_local_tts = bool(raw_use_local_tts)
+        config.tts_provider = str(tts_cfg.get("provider", config.tts_provider)).strip().lower()
+        config.tts_qwen_backend = str(tts_cfg.get("qwen_backend", config.tts_qwen_backend)).strip().lower()
+        config.tts_voice = tts_cfg.get("voice", config.tts_voice)
+        config.tts_model_size = tts_cfg.get("model_size", config.tts_model_size)
+        config.tts_default_style = tts_cfg.get("default_style", config.tts_default_style)
+        config.tts_endpoint_id = tts_cfg.get("endpoint_id", config.tts_endpoint_id)
+        config.tts_api_key = tts_cfg.get("api_key", config.tts_api_key)
+        config.tts_timeout = int(tts_cfg.get("timeout", config.tts_timeout))
+        config.tts_poll_interval = float(tts_cfg.get("poll_interval", config.tts_poll_interval))
+        config.tts_local_model_path = tts_cfg.get("local_model_path", config.tts_local_model_path)
+        config.tts_local_tokenizer_path = tts_cfg.get("local_tokenizer_path", config.tts_local_tokenizer_path)
+        config.tts_qwen_device = tts_cfg.get("qwen_device", config.tts_qwen_device)
+        config.tts_piper_model_path = tts_cfg.get("piper_model_path", config.tts_piper_model_path)
+        config.tts_elevenlabs_api_key = eleven_cfg.get(
+            "api_key",
+            tts_cfg.get("elevenlabs_api_key", config.tts_elevenlabs_api_key),
+        )
+        config.tts_elevenlabs_voice_id = eleven_cfg.get(
+            "voice_id",
+            tts_cfg.get("elevenlabs_voice_id", config.tts_elevenlabs_voice_id),
+        )
+        config.tts_elevenlabs_model_id = eleven_cfg.get(
+            "model_id",
+            tts_cfg.get("elevenlabs_model_id", config.tts_elevenlabs_model_id),
+        )
+        config.tts_elevenlabs_output_format = eleven_cfg.get(
+            "output_format",
+            tts_cfg.get("elevenlabs_output_format", config.tts_elevenlabs_output_format),
+        )
+        raw_streaming_endpoint = eleven_cfg.get(
+            "use_streaming_endpoint",
+            tts_cfg.get("elevenlabs_use_streaming_endpoint", config.tts_elevenlabs_use_streaming_endpoint),
+        )
+        if isinstance(raw_streaming_endpoint, str):
+            config.tts_elevenlabs_use_streaming_endpoint = raw_streaming_endpoint.strip().lower() in ("true", "1", "yes")
+        else:
+            config.tts_elevenlabs_use_streaming_endpoint = bool(raw_streaming_endpoint)
+        config.tts_elevenlabs_optimize_streaming_latency = int(
+            eleven_cfg.get(
+                "optimize_streaming_latency",
+                tts_cfg.get(
+                    "elevenlabs_optimize_streaming_latency",
+                    config.tts_elevenlabs_optimize_streaming_latency,
+                ),
+            )
+        )
+        config.tts_elevenlabs_stability = float(
+            eleven_cfg.get("stability", tts_cfg.get("elevenlabs_stability", config.tts_elevenlabs_stability))
+        )
+        config.tts_elevenlabs_similarity_boost = float(
+            eleven_cfg.get(
+                "similarity_boost",
+                tts_cfg.get("elevenlabs_similarity_boost", config.tts_elevenlabs_similarity_boost),
+            )
+        )
+        config.tts_elevenlabs_style = float(
+            eleven_cfg.get("style", tts_cfg.get("elevenlabs_style", config.tts_elevenlabs_style))
+        )
+        raw_use_speaker_boost = eleven_cfg.get(
+            "use_speaker_boost",
+            tts_cfg.get("elevenlabs_use_speaker_boost", config.tts_elevenlabs_use_speaker_boost),
+        )
+        if isinstance(raw_use_speaker_boost, str):
+            config.tts_elevenlabs_use_speaker_boost = raw_use_speaker_boost.strip().lower() in ("true", "1", "yes")
+        else:
+            config.tts_elevenlabs_use_speaker_boost = bool(raw_use_speaker_boost)
+        config.tts_elevenlabs_speed = float(
+            eleven_cfg.get("speed", tts_cfg.get("elevenlabs_speed", config.tts_elevenlabs_speed))
+        )
+        raw_style_presets = eleven_cfg.get(
+            "style_presets",
+            tts_cfg.get("elevenlabs_style_presets", config.tts_elevenlabs_style_presets),
+        )
+        if isinstance(raw_style_presets, dict):
+            parsed_style_presets: Dict[str, Dict[str, float]] = {}
+            for raw_style_name, raw_style_values in raw_style_presets.items():
+                if not isinstance(raw_style_values, dict):
+                    continue
+                style_name = str(raw_style_name).strip().lower()
+                if not style_name:
+                    continue
+
+                values: Dict[str, float] = {}
+                for key in ("stability", "style", "speed"):
+                    if key not in raw_style_values:
+                        continue
+                    try:
+                        values[key] = float(raw_style_values[key])
+                    except (TypeError, ValueError):
+                        continue
+
+                if values:
+                    parsed_style_presets[style_name] = values
+            if parsed_style_presets:
+                config.tts_elevenlabs_style_presets = parsed_style_presets
+
+        config.sample_rate = audio_cfg.get("sample_rate", config.sample_rate)
+        if isinstance(wake_cfg, dict):
+            config.wake_word_keyword = str(
+                wake_cfg.get("keyword", config.wake_word_keyword)
+            ).strip() or "киви"
+            config.wake_word_position_limit = int(
+                wake_cfg.get("position_limit", config.wake_word_position_limit)
+            )
+
+        # LLM settings from YAML
+        config.llm_model = llm_cfg.get("model", config.llm_model)
+        config.llm_filter_timeout = llm_cfg.get("filter_timeout", config.llm_filter_timeout)
+        config.llm_filter_subprocess_timeout = llm_cfg.get("filter_subprocess_timeout", config.llm_filter_subprocess_timeout)
+        config.llm_stream_stall_timeout = float(
+            llm_cfg.get("stream_stall_timeout", config.llm_stream_stall_timeout)
+        )
+        config.llm_stream_stall_retry_max = int(
+            llm_cfg.get("stream_stall_retry_max", config.llm_stream_stall_retry_max)
+        )
+        if llm_cfg.get("chat_timeout"):
+            config.openclaw_timeout = llm_cfg.get("chat_timeout")
+        config.llm_retry_max = llm_cfg.get("retry_max", config.llm_retry_max)
+        config.llm_retry_delays = llm_cfg.get("retry_delays", config.llm_retry_delays)
+
+        # Voice system prompt from YAML
+        if llm_cfg.get("voice_system_prompt"):
+            config.voice_system_prompt = llm_cfg.get("voice_system_prompt")
+
+        # WebSocket settings from YAML
+        config.ws_enabled = ws_cfg.get("enabled", config.ws_enabled)
+        config.ws_port = ws_cfg.get("port", config.ws_port)
+        config.ws_host = ws_cfg.get("host", config.ws_host)
+        config.ws_reconnect_interval = ws_cfg.get("reconnect_interval", config.ws_reconnect_interval)
+        config.ws_max_reconnect_attempts = ws_cfg.get("max_reconnect_attempts", config.ws_max_reconnect_attempts)
+        config.ws_ping_interval = float(ws_cfg.get("ping_interval", config.ws_ping_interval))
+        config.ws_ping_timeout = float(ws_cfg.get("ping_timeout", config.ws_ping_timeout))
+
+        if os.getenv("RUNPOD_TTS_ENDPOINT_ID"):
+            config.tts_endpoint_id = os.getenv("RUNPOD_TTS_ENDPOINT_ID")
+        if os.getenv("RUNPOD_API_KEY"):
+            config.tts_api_key = os.getenv("RUNPOD_API_KEY")
+        if os.getenv("ELEVENLABS_API_KEY"):
+            config.tts_elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+        if os.getenv("OPENCLAW_BIN"):
+            config.openclaw_bin = os.getenv("OPENCLAW_BIN")
+        if os.getenv("OPENCLAW_SESSION_ID"):
+            config.openclaw_session_id = os.getenv("OPENCLAW_SESSION_ID")
+        if os.getenv("OPENCLAW_AGENT"):
+            config.openclaw_agent = os.getenv("OPENCLAW_AGENT")
+        if os.getenv("OPENCLAW_TIMEOUT"):
+            config.openclaw_timeout = int(os.getenv("OPENCLAW_TIMEOUT"))
+        if os.getenv("LLM_MODEL"):
+            config.llm_model = os.getenv("LLM_MODEL")
+        if os.getenv("KIWI_STREAM_STALL_TIMEOUT"):
+            config.llm_stream_stall_timeout = float(os.getenv("KIWI_STREAM_STALL_TIMEOUT"))
+        if os.getenv("KIWI_STREAM_STALL_RETRY_MAX"):
+            config.llm_stream_stall_retry_max = int(os.getenv("KIWI_STREAM_STALL_RETRY_MAX"))
+        if os.getenv("KIWI_WS_ENABLED"):
+            config.ws_enabled = os.getenv("KIWI_WS_ENABLED").lower() in ("true", "1", "yes")
+        if os.getenv("KIWI_WS_PORT"):
+            config.ws_port = int(os.getenv("KIWI_WS_PORT"))
+        if os.getenv("KIWI_WS_HOST"):
+            config.ws_host = os.getenv("KIWI_WS_HOST")
+        if os.getenv("KIWI_WS_PING_INTERVAL"):
+            config.ws_ping_interval = float(os.getenv("KIWI_WS_PING_INTERVAL"))
+        if os.getenv("KIWI_WS_PING_TIMEOUT"):
+            config.ws_ping_timeout = float(os.getenv("KIWI_WS_PING_TIMEOUT"))
+        if os.getenv("KIWI_WAKE_WORD"):
+            config.wake_word_keyword = os.getenv("KIWI_WAKE_WORD").strip() or "киви"
+        if os.getenv("KIWI_WAKE_POSITION_LIMIT"):
+            config.wake_word_position_limit = int(os.getenv("KIWI_WAKE_POSITION_LIMIT"))
+
+        if os.getenv("KIWI_USE_LOCAL_TTS"):
+            config.use_local_tts = os.getenv("KIWI_USE_LOCAL_TTS").lower() in ("true", "1", "yes")
+        if os.getenv("KIWI_TTS_PROVIDER"):
+            config.tts_provider = os.getenv("KIWI_TTS_PROVIDER").strip().lower()
+        if os.getenv("KIWI_QWEN_BACKEND"):
+            config.tts_qwen_backend = os.getenv("KIWI_QWEN_BACKEND").strip().lower()
+        if os.getenv("KIWI_TTS_VOICE"):
+            config.tts_voice = os.getenv("KIWI_TTS_VOICE").strip()
+        if os.getenv("KIWI_TTS_MODEL_SIZE"):
+            config.tts_model_size = os.getenv("KIWI_TTS_MODEL_SIZE").strip()
+        if os.getenv("KIWI_TTS_TIMEOUT"):
+            config.tts_timeout = int(os.getenv("KIWI_TTS_TIMEOUT"))
+        if os.getenv("KIWI_TTS_POLL_INTERVAL"):
+            config.tts_poll_interval = float(os.getenv("KIWI_TTS_POLL_INTERVAL"))
+        if os.getenv("KIWI_TTS_LOCAL_MODEL_PATH"):
+            config.tts_local_model_path = os.getenv("KIWI_TTS_LOCAL_MODEL_PATH").strip()
+        if os.getenv("KIWI_TTS_LOCAL_TOKENIZER_PATH"):
+            config.tts_local_tokenizer_path = os.getenv("KIWI_TTS_LOCAL_TOKENIZER_PATH").strip()
+        if os.getenv("KIWI_TTS_QWEN_DEVICE"):
+            config.tts_qwen_device = os.getenv("KIWI_TTS_QWEN_DEVICE").strip().lower()
+        if os.getenv("KIWI_TTS_PIPER_MODEL_PATH"):
+            config.tts_piper_model_path = os.getenv("KIWI_TTS_PIPER_MODEL_PATH").strip()
+        if os.getenv("KIWI_ELEVENLABS_API_KEY"):
+            config.tts_elevenlabs_api_key = os.getenv("KIWI_ELEVENLABS_API_KEY").strip()
+        if os.getenv("KIWI_ELEVENLABS_VOICE_ID"):
+            config.tts_elevenlabs_voice_id = os.getenv("KIWI_ELEVENLABS_VOICE_ID").strip()
+        if os.getenv("KIWI_ELEVENLABS_MODEL_ID"):
+            config.tts_elevenlabs_model_id = os.getenv("KIWI_ELEVENLABS_MODEL_ID").strip()
+        if os.getenv("KIWI_ELEVENLABS_OUTPUT_FORMAT"):
+            config.tts_elevenlabs_output_format = os.getenv("KIWI_ELEVENLABS_OUTPUT_FORMAT").strip()
+        if os.getenv("KIWI_ELEVENLABS_STREAMING_ENDPOINT"):
+            config.tts_elevenlabs_use_streaming_endpoint = os.getenv("KIWI_ELEVENLABS_STREAMING_ENDPOINT").strip().lower() in ("true", "1", "yes")
+        if os.getenv("KIWI_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY"):
+            config.tts_elevenlabs_optimize_streaming_latency = int(os.getenv("KIWI_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY"))
+        if os.getenv("KIWI_ELEVENLABS_STABILITY"):
+            config.tts_elevenlabs_stability = float(os.getenv("KIWI_ELEVENLABS_STABILITY"))
+        if os.getenv("KIWI_ELEVENLABS_SIMILARITY_BOOST"):
+            config.tts_elevenlabs_similarity_boost = float(os.getenv("KIWI_ELEVENLABS_SIMILARITY_BOOST"))
+        if os.getenv("KIWI_ELEVENLABS_STYLE"):
+            config.tts_elevenlabs_style = float(os.getenv("KIWI_ELEVENLABS_STYLE"))
+        if os.getenv("KIWI_ELEVENLABS_USE_SPEAKER_BOOST"):
+            config.tts_elevenlabs_use_speaker_boost = os.getenv("KIWI_ELEVENLABS_USE_SPEAKER_BOOST").strip().lower() in ("true", "1", "yes")
+        if os.getenv("KIWI_ELEVENLABS_SPEED"):
+            config.tts_elevenlabs_speed = float(os.getenv("KIWI_ELEVENLABS_SPEED"))
+
+        provider_explicit = ("provider" in tts_cfg) or bool(os.getenv("KIWI_TTS_PROVIDER"))
+        qwen_backend_explicit = ("qwen_backend" in tts_cfg) or bool(os.getenv("KIWI_QWEN_BACKEND"))
+        if not provider_explicit:
+            if config.use_local_tts:
+                config.tts_provider = "piper"
+                if not qwen_backend_explicit:
+                    config.tts_qwen_backend = "local"
+            else:
+                config.tts_provider = "qwen3"
+                if not qwen_backend_explicit:
+                    config.tts_qwen_backend = "runpod"
+
+        provider_aliases = {
+            "qwen": "qwen3",
+            "qwen3_tts": "qwen3",
+            "piper_tts": "piper",
+            "eleven": "elevenlabs",
+            "eleven_labs": "elevenlabs",
+            "11labs": "elevenlabs",
+        }
+        config.tts_provider = provider_aliases.get(config.tts_provider, config.tts_provider)
+        if config.tts_provider not in {"qwen3", "piper", "elevenlabs"}:
+            kiwi_log("CONFIG", f"Unknown tts.provider='{config.tts_provider}', fallback to qwen3", level="WARNING")
+            config.tts_provider = "qwen3"
+        if config.tts_qwen_backend not in {"local", "runpod"}:
+            kiwi_log("CONFIG", f"Unknown tts.qwen_backend='{config.tts_qwen_backend}', fallback to runpod", level="WARNING")
+            config.tts_qwen_backend = "runpod"
+
+        config.tts_model_size = normalize_qwen_model_size(config.tts_model_size)
+        if config.tts_provider == "qwen3":
+            config.tts_voice = normalize_qwen_voice(config.tts_voice)
+        else:
+            config.tts_voice = str(config.tts_voice or "").strip() or "Ono_Anna"
+        config.tts_elevenlabs_voice_id = normalize_elevenlabs_voice_id(config.tts_elevenlabs_voice_id)
+        config.use_local_tts = (
+            config.tts_provider == "piper"
+            or (config.tts_provider == "qwen3" and config.tts_qwen_backend == "local")
+        )
+        if config.tts_provider == "qwen3" and config.tts_qwen_backend == "local":
+            config.tts_local_model_path = cls._sync_local_qwen_model_path(
+                config.tts_local_model_path,
+                config.tts_model_size,
+            )
+
+        # Owner name from speaker_priority config
+        sp_cfg = yaml_config.get("speaker_priority", {})
+        owner_cfg = sp_cfg.get("owner", {})
+        if owner_cfg.get("name"):
+            config.owner_name = str(owner_cfg["name"]).strip()
+
+        if config.stt_device == "cuda" and not check_cuda_available():
+            kiwi_log("CONFIG", "Requested CUDA for STT, but CUDA not available! Falling back to CPU", level="WARNING")
+            config.stt_device = "cpu"
+            # float16 не работает на CPU, используем int8
+            if config.stt_compute_type == "float16":
+                kiwi_log("CONFIG", "Changing compute_type from float16 to int8 for CPU compatibility", level="INFO")
+                config.stt_compute_type = "int8"
+
+        return config
+
+    def print_config_banner(self):
+        """Print a startup summary with ASCII-safe formatting."""
+        stt_device_label = "CUDA" if self.stt_device == "cuda" else "CPU"
+        tts_device_label = None
+        if self.tts_provider == "piper":
+            tts_type = "Piper (local)"
+            tts_model = self.tts_piper_model_path or "ru_RU-irina-medium.onnx"
+            tts_voice = self.tts_voice
+        elif self.tts_provider == "elevenlabs":
+            tts_type = "ElevenLabs (cloud)"
+            tts_model = self.tts_elevenlabs_model_id
+            tts_voice = self.tts_elevenlabs_voice_id
+        elif self.tts_provider == "qwen3" and self.tts_qwen_backend == "local":
+            tts_type = f"Qwen3-TTS {self.tts_model_size} (local)"
+            tts_model = self.tts_local_model_path or f"Qwen3-TTS-12Hz-{self.tts_model_size}-CustomVoice"
+            tts_device_label = self.tts_qwen_device.upper()
+            tts_voice = self.tts_voice
+        else:
+            tts_type = f"Qwen3-TTS {self.tts_model_size} (RunPod)"
+            tts_model = self.tts_endpoint_id
+            tts_voice = self.tts_voice
+
+        line = "=" * 58
+        print("\n" + line)
+        print("KIWI VOICE SERVICE")
+        print(line)
+        print(f"STT   : Faster Whisper ({self.stt_model})")
+        print(f"\t\tDevice: {stt_device_label}")
+        print(f"TTS   : {tts_type}")
+        print(f"\t\tModel : {tts_model}")
+        if tts_device_label:
+            print(f"\t\tDevice: {tts_device_label}")
+        print(f"\t\tVoice : {tts_voice}")
+        print("VAD   : Silero VAD (ONNX)")
+        print(f"LLM   : OpenClaw (session: {self.openclaw_session_id})")
+        print(f"Lang  : {self.stt_language.upper()}")
+        print(line + "\n")
