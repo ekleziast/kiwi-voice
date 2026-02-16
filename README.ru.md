@@ -5,7 +5,7 @@
 <h1 align="center">Kiwi Voice</h1>
 
 <p align="center">
-  <strong>Голосовой ассистент для OpenClaw — распознавание говорящего, контроль доступа голосом, прерывание на лету и потоковая озвучка</strong>
+  <strong>Голосовой ассистент для OpenClaw — от микрофона до ответа за секунды</strong>
 </p>
 
 <p align="center">
