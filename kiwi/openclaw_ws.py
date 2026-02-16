@@ -495,8 +495,18 @@ class OpenClawWebSocket:
                     if pending.get("method") == "chat.send":
                         run_id = payload.get("runId")
                         if run_id:
-                            self._current_run_id = run_id
-                            self._log_ws(f"Active runId set from chat.send response: {run_id}", "DEBUG")
+                            # Only set if not already set by an arriving event.
+                            # Events can arrive BEFORE the chat.send response,
+                            # and their runId is the source of truth.
+                            if not self._current_run_id:
+                                self._current_run_id = run_id
+                                self._log_ws(f"Active runId set from chat.send response: {run_id}", "DEBUG")
+                            elif self._current_run_id != run_id:
+                                self._log_ws(
+                                    f"runId mismatch: response={run_id}, active={self._current_run_id}. "
+                                    f"Keeping active (set by event).",
+                                    "WARN",
+                                )
             else:
                 error = payload.get("error", payload.get("message", str(payload)))
                 self._log_ws(f"Response ERROR for {req_id}: {error}", "ERROR")
@@ -742,6 +752,11 @@ class OpenClawWebSocket:
 
         # Игнорируем события от чужих сессий.
         if session_key and session_key != self._session_key:
+            self._log_ws(
+                f"Ignoring agent event for foreign sessionKey={session_key} "
+                f"(mine={self._session_key}, stream={stream}, runId={run_id[:12] if run_id else 'none'})",
+                "WARN" if stream == "lifecycle" else "DEBUG",
+            )
             return
 
         if not isinstance(data, dict):
@@ -785,7 +800,7 @@ class OpenClawWebSocket:
             if phase in ("thinking", "plan", "planning"):
                 self._emit_activity("lifecycle", "Планирую шаги решения.", {"phase": phase})
 
-            if phase in ("end", "done", "complete", "completed"):
+            if phase in ("end", "done", "complete", "completed", "finish", "finished"):
                 synthetic = {
                     "runId": run_id,
                     "sessionKey": session_key,
@@ -1027,11 +1042,24 @@ class OpenClawWebSocket:
 
             self._response_event.set()
         else:
-            # Неизвестное состояние логируем явно, чтобы видеть формат gateway
+            # Неизвестное состояние логируем явно, чтобы видеть формат gateway.
+            # Treat any unrecognized state as terminal to prevent hanging forever
+            # (watchdog would eventually time out, but this is faster).
             self._log_ws(
-                f"Unknown chat state='{state}'. Payload keys: {list(payload.keys())[:12]}",
+                f"Unknown chat state='{state}'. Treating as terminal. "
+                f"Payload keys: {list(payload.keys())[:12]}",
                 "WARN"
             )
+            self._is_streaming = False
+            self._is_processing = False
+
+            if self._callback_mode == "streaming" and self.on_complete:
+                with self._buffer_lock:
+                    if not self._full_response and self._accumulated_text:
+                        self._full_response = self._accumulated_text
+                self.on_complete(self._full_response)
+
+            self._response_event.set()
 
     def _send_connect(self, nonce: str):
         """Отправляет connect request с правильными ConnectParams (протокол v3).
