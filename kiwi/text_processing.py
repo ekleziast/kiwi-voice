@@ -106,6 +106,87 @@ def clean_chunk_for_tts(chunk: str) -> str:
     return chunk
 
 
+def quick_completeness_check(text: str) -> bool:
+    """
+    Quick local completeness check without LLM.
+    Returns True if the phrase is clearly complete, False otherwise.
+    """
+    stripped = text.strip().lower()
+    words = stripped.split()
+
+    if len(stripped) < 5:
+        return False
+
+    # Ends with punctuation — clearly complete
+    if stripped.endswith(('.', '!', '?')):
+        return True
+
+    # Long phrase without incomplete patterns — likely complete
+    incomplete_endings = {
+        'и', 'а', 'но', 'или', 'да', 'либо', 'тоже', 'также',
+        'что', 'чтобы', 'когда', 'если', 'хотя', 'потому', 'так',
+        'который', 'которая', 'которое', 'которые',
+        'какой', 'какая', 'какое', 'какие',
+        'кто', 'чей', 'где', 'куда', 'откуда',
+        'в', 'на', 'с', 'под', 'над', 'за', 'перед', 'при',
+        'к', 'по', 'у', 'о', 'об', 'до', 'от', 'для', 'без',
+    }
+    incomplete_patterns = [
+        'я хочу', 'я буду', 'я собираюсь', 'мне нужно', 'надо бы',
+        'давай', 'скажи', 'расскажи', 'покажи', 'объясни', 'помоги',
+    ]
+
+    # If >= 5 words and doesn't end with conjunction/preposition
+    if len(words) >= 5:
+        last_word = words[-1].rstrip('.,!?')
+        if last_word not in incomplete_endings and not stripped.endswith((',', '...')):
+            # Check for incomplete patterns
+            for pattern in incomplete_patterns:
+                if stripped.endswith(pattern):
+                    return False
+            return True
+
+    # Clearly complete phrases
+    complete_patterns = [
+        'что-нибудь', 'что-то', 'всё', 'ничего', 'пожалуйста',
+        'анекдот', 'историю', 'сказку', 'шутку', 'время', 'дату', 'погоду',
+    ]
+    for pattern in complete_patterns:
+        if pattern in stripped:
+            return True
+
+    return False
+
+
+def detect_emotion(command: str, response: str) -> str:
+    """Determine emotional style for a response based on command/response text."""
+    command_lower = command.lower()
+    response_lower = response.lower()
+
+    if any(w in command_lower for w in ["срочно", "быстро", "важно"]):
+        return "confident"
+    if any(w in command_lower for w in ["грустно", "плохо", "ужасно", "грустный"]):
+        return "sad"
+    if any(w in command_lower for w in ["круто", "отлично", "супер", "ура", "радостно"]):
+        return "excited"
+    if any(w in command_lower for w in ["тихо", "секрет", "шёпотом"]):
+        return "whisper"
+    if any(w in command_lower for w in ["пошути", "анекдот", "смешно"]):
+        return "playful"
+    if any(w in command_lower for w in ["расскажи", "объясни", "что такое"]):
+        return "neutral"
+
+    if any(w in response_lower for w in ["извини", "к сожалению", "не могу"]):
+        return "calm"
+    if any(w in response_lower for w in ["!", "отлично", "здорово", "супер"]):
+        return "cheerful"
+
+    if "?" in command:
+        return "playful"
+
+    return "neutral"
+
+
 def split_text_into_chunks(text: str, max_chunk_size: int = 150) -> list:
     """Split text into sentence-aware chunks for streaming TTS."""
     sentences = re.split(r'(?<=[.!?])\s+', text)
