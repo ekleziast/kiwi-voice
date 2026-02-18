@@ -76,6 +76,7 @@ class ElevenLabsTTSConfig:
     style: float = 0.25
     use_speaker_boost: bool = True
     speed: float = 1.0
+    ws_streaming: bool = True
     style_presets: Dict[str, Dict[str, float]] = field(
         default_factory=lambda: deepcopy(DEFAULT_ELEVENLABS_STYLE_PRESETS)
     )

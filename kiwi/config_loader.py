@@ -110,6 +110,7 @@ class KiwiConfig:
     tts_elevenlabs_style: float = 0.25
     tts_elevenlabs_use_speaker_boost: bool = True
     tts_elevenlabs_speed: float = 1.0
+    tts_elevenlabs_ws_streaming: bool = True
     tts_elevenlabs_style_presets: Dict[str, Dict[str, float]] = field(
         default_factory=lambda: {
             style_name: dict(style_values)
@@ -235,6 +236,14 @@ class KiwiConfig:
         config.tts_elevenlabs_speed = float(
             eleven_cfg.get("speed", tts_cfg.get("elevenlabs_speed", config.tts_elevenlabs_speed))
         )
+        raw_ws_streaming = eleven_cfg.get(
+            "ws_streaming",
+            tts_cfg.get("elevenlabs_ws_streaming", config.tts_elevenlabs_ws_streaming),
+        )
+        if isinstance(raw_ws_streaming, str):
+            config.tts_elevenlabs_ws_streaming = raw_ws_streaming.strip().lower() in ("true", "1", "yes")
+        else:
+            config.tts_elevenlabs_ws_streaming = bool(raw_ws_streaming)
         raw_style_presets = eleven_cfg.get(
             "style_presets",
             tts_cfg.get("elevenlabs_style_presets", config.tts_elevenlabs_style_presets),
@@ -378,6 +387,8 @@ class KiwiConfig:
             config.tts_elevenlabs_use_speaker_boost = os.getenv("KIWI_ELEVENLABS_USE_SPEAKER_BOOST").strip().lower() in ("true", "1", "yes")
         if os.getenv("KIWI_ELEVENLABS_SPEED"):
             config.tts_elevenlabs_speed = float(os.getenv("KIWI_ELEVENLABS_SPEED"))
+        if os.getenv("KIWI_ELEVENLABS_WS_STREAMING"):
+            config.tts_elevenlabs_ws_streaming = os.getenv("KIWI_ELEVENLABS_WS_STREAMING").strip().lower() in ("true", "1", "yes")
 
         provider_explicit = ("provider" in tts_cfg) or bool(os.getenv("KIWI_TTS_PROVIDER"))
         qwen_backend_explicit = ("qwen_backend" in tts_cfg) or bool(os.getenv("KIWI_QWEN_BACKEND"))

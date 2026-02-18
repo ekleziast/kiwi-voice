@@ -146,16 +146,42 @@ class TTSSpeechMixin:
             self._task_status_announcer.stop()
             self._task_status_announcer = None
 
-        synthesis_workers = 2 if self.tts_provider == "elevenlabs" else 1
-        self._streaming_tts_manager = StreamingTTSManager(
-            tts_callback=self._speak_chunk,
-            tts_synthesize_callback=self._synthesize_chunk,
-            playback_callback=self._play_streaming_response_chunk,
-            synthesis_workers=synthesis_workers,
-            min_chunk_chars=12,
-            max_chunk_chars=150,
-            max_chunk_wait_s=min(20.0, float(self.config.tts_timeout)),
+        use_ws = (
+            self.tts_provider == "elevenlabs"
+            and getattr(self.config, "tts_elevenlabs_ws_streaming", True)
         )
+
+        if use_ws:
+            from kiwi.tts.elevenlabs_ws import ElevenLabsWSStreamManager
+
+            voice_settings = {
+                "stability": self.config.tts_elevenlabs_stability,
+                "similarity_boost": self.config.tts_elevenlabs_similarity_boost,
+                "style": self.config.tts_elevenlabs_style,
+                "use_speaker_boost": self.config.tts_elevenlabs_use_speaker_boost,
+            }
+
+            self._streaming_tts_manager = ElevenLabsWSStreamManager(
+                api_key=self.config.tts_elevenlabs_api_key,
+                voice_id=self.config.tts_elevenlabs_voice_id,
+                model_id=self.config.tts_elevenlabs_model_id,
+                voice_settings=voice_settings,
+                playback_callback=self._play_streaming_response_chunk,
+                speed=self.config.tts_elevenlabs_speed,
+            )
+            kiwi_log("KIWI", "Using ElevenLabs WS streaming", level="INFO")
+        else:
+            synthesis_workers = 2 if self.tts_provider == "elevenlabs" else 1
+            self._streaming_tts_manager = StreamingTTSManager(
+                tts_callback=self._speak_chunk,
+                tts_synthesize_callback=self._synthesize_chunk,
+                playback_callback=self._play_streaming_response_chunk,
+                synthesis_workers=synthesis_workers,
+                min_chunk_chars=12,
+                max_chunk_chars=150,
+                max_chunk_wait_s=min(20.0, float(self.config.tts_timeout)),
+            )
+
         self._streaming_tts_manager.start()
 
         self._task_status_announcer = TaskStatusAnnouncer(
