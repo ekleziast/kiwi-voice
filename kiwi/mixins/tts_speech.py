@@ -216,14 +216,17 @@ class TTSSpeechMixin:
                 self.listener._tts_start_time = time.time()
                 self.listener._barge_in_counter = 0
 
-            if self._task_status_announcer:
-                self._task_status_announcer.on_tts_playing(True)
+            try:
+                if self._task_status_announcer:
+                    self._task_status_announcer.on_tts_playing(True)
+            except Exception:
+                pass
 
             with self._sd_play_lock:
                 sd.play(audio, sample_rate, device=self.config.output_device)
 
                 poll_interval = 0.05
-                max_duration = duration_s + 1.5
+                max_duration = duration_s + 2.0
                 started = time.monotonic()
 
                 interrupted = False
@@ -240,6 +243,15 @@ class TTSSpeechMixin:
                         else:
                             kiwi_log("TTS-CHUNK", "Playback interrupted by barge-in", level="INFO")
                         break
+
+                    # Check if audio playback has actually finished
+                    try:
+                        stream = sd.get_stream()
+                        if stream is None or not stream.active:
+                            break
+                    except Exception:
+                        pass
+
                     time.sleep(poll_interval)
                 else:
                     kiwi_log(
@@ -268,8 +280,11 @@ class TTSSpeechMixin:
             if hasattr(self, "listener") and self.listener:
                 self.listener._tts_start_time = time.time()
 
-            if self._task_status_announcer:
-                self._task_status_announcer.on_tts_playing(False)
+            try:
+                if self._task_status_announcer:
+                    self._task_status_announcer.on_tts_playing(False)
+            except Exception:
+                pass
 
     def _play_streaming_response_chunk(self, audio: np.ndarray, sample_rate: int):
         """Playback callback for LLM response chunks only (not status announcer)."""

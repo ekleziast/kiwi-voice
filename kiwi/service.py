@@ -161,7 +161,7 @@ class KiwiServiceOpenClaw(
             DialogueState.IDLE: None,           # Бесконечный
             DialogueState.LISTENING: 5.0,      # 5 сек на команду
             DialogueState.PROCESSING: 25.0,     # LLM completeness/intent + buffer
-            DialogueState.THINKING: 150.0,      # OpenClaw chat + buffer
+            DialogueState.THINKING: 60.0,       # OpenClaw chat + buffer
             DialogueState.SPEAKING: None,       # До конца TTS
         }
         self._state_until = 0.0

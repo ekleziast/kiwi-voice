@@ -113,10 +113,18 @@ class StreamingTTSManager:
 
         if self._playback_thread and self._playback_thread.is_alive():
             if graceful:
-                self._playback_thread.join(timeout=60.0)
+                # Dynamic timeout: ~5s per pending chunk + base 10s
+                with self._lock:
+                    pending_chunks = max(0, self._next_chunk_id - self._next_play_id)
+                graceful_timeout = max(15.0, 10.0 + pending_chunks * 5.0)
+                self._playback_thread.join(timeout=graceful_timeout)
                 if self._playback_thread.is_alive():
-                    kiwi_log("STREAM-TTS", "Playback thread did not finish in 60s, forcing stop", level="WARNING")
+                    kiwi_log("STREAM-TTS",
+                        f"Playback thread did not finish in {graceful_timeout:.0f}s, forcing stop",
+                        level="WARNING")
                     self._stop_event.set()
+                    with self._lock:
+                        self._graceful_shutdown = False
                     self._playback_thread.join(timeout=3.0)
             else:
                 self._playback_thread.join(timeout=2.0)

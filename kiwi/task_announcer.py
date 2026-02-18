@@ -65,7 +65,14 @@ class TaskStatusAnnouncer:
 
     def on_tts_playing(self, is_playing: bool):
         """Основной TTS начал/закончил воспроизведение."""
-        with self._lock:
+        acquired = self._lock.acquire(timeout=1.0)
+        if acquired:
+            try:
+                self._tts_is_playing = is_playing
+            finally:
+                self._lock.release()
+        else:
+            # Lock stuck (e.g. deadlock in monitor thread) — update without lock
             self._tts_is_playing = is_playing
 
     def on_activity(self, message: str):
@@ -148,9 +155,11 @@ class TaskStatusAnnouncer:
         self.speak_func(msg_to_speak)
 
     def _generate_status_message(self, elapsed: float) -> str:
-        """Генерирует статусное сообщение на основе контекста."""
-        with self._lock:
-            text = self._last_text
+        """Генерирует статусное сообщение на основе контекста.
+
+        IMPORTANT: caller must hold self._lock already.
+        """
+        text = self._last_text
 
         # Если текста нет — используем общие фразы
         if not text or len(text) < 10:

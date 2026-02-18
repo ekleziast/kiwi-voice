@@ -81,6 +81,7 @@ class OpenClawWebSocket:
         self._accumulated_text = ""
         self._buffer_lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._last_ws_recv_ts = 0.0  # timestamp of last received WS message
 
         # Reconnection state
         self._reconnect_attempts = 0
@@ -391,6 +392,39 @@ class OpenClawWebSocket:
         self._reconnect_thread = threading.Thread(target=reconnect_worker, daemon=True)
         self._reconnect_thread.start()
 
+    def is_ws_alive(self, threshold_s: float = 15.0) -> bool:
+        """True if a WS message was received within *threshold_s* seconds."""
+        if not self._is_authenticated:
+            return False
+        if self._last_ws_recv_ts <= 0:
+            return False
+        return (time.time() - self._last_ws_recv_ts) < threshold_s
+
+    def force_reconnect(self, reason: str = "forced") -> bool:
+        """Close current WS and reconnect synchronously (best-effort, timeout 10s)."""
+        self._log_ws(f"Force reconnect: {reason}", "WARNING")
+        self._is_authenticated = False
+        self._is_connected = False
+
+        # Close existing socket
+        if self._ws:
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+
+        # Wait for WS thread to die
+        if self._ws_thread and self._ws_thread.is_alive():
+            self._ws_thread.join(timeout=3.0)
+
+        # Reconnect (blocking, up to ~15s with auth wait)
+        ok = self.connect()
+        if ok:
+            self._log_ws("Force reconnect succeeded", "INFO")
+        else:
+            self._log_ws("Force reconnect failed", "ERROR")
+        return ok
+
     def _handle_message(self, message: str):
         """Обрабатывает сообщения от WebSocket по протоколу Gateway v3.
 
@@ -399,6 +433,7 @@ class OpenClawWebSocket:
         - "res"   → ответы на наши requests (connect, chat.send, chat.abort)
         """
         try:
+            self._last_ws_recv_ts = time.time()
             data = json.loads(message)
             msg_type = data.get("type", "")
 
@@ -426,7 +461,18 @@ class OpenClawWebSocket:
         self._is_processing = False
         self._current_run_id = None
 
-        with self._buffer_lock:
+        acquired = self._buffer_lock.acquire(timeout=3.0)
+        if acquired:
+            try:
+                if not self._full_response:
+                    self._full_response = (
+                        "Извини, соединение с OpenClaw прервалось. "
+                        "Повтори запрос."
+                    )
+            finally:
+                self._buffer_lock.release()
+        else:
+            self._log_ws("_fail_active_request: _buffer_lock timeout (3s)", "WARNING")
             if not self._full_response:
                 self._full_response = (
                     "Извини, соединение с OpenClaw прервалось. "
@@ -933,7 +979,11 @@ class OpenClawWebSocket:
             # 2) incremental: content = только новый кусок
             # Делаем сборку, устойчивую к обоим форматам.
             if content:
-                with self._buffer_lock:
+                new_text = ""
+                acquired = self._buffer_lock.acquire(timeout=5.0)
+                if not acquired:
+                    self._log_ws("CRITICAL: _buffer_lock stuck for 5s in delta handler, processing without lock", "ERROR")
+                try:
                     prev_text = self._accumulated_text
 
                     # Формат 1: cumulative (новый content начинается с уже накопленного текста)
@@ -972,12 +1022,13 @@ class OpenClawWebSocket:
                         f"Chat delta: +{len(new_text)} chars (cumulative: {len(updated_text)})",
                         "DEBUG"
                     )
+                finally:
+                    if acquired:
+                        self._buffer_lock.release()
 
-                    # Передаём только НОВУЮ часть в StreamingTTSManager (inside lock
-                    # to prevent next delta from modifying _accumulated_text before
-                    # the callback fires).
-                    if new_text and self.on_token:
-                        self.on_token(new_text)
+                # Callback OUTSIDE _buffer_lock to prevent lock starvation
+                if new_text and self.on_token:
+                    self.on_token(new_text)
 
         elif state == "final":
             if run_id:
@@ -1231,10 +1282,18 @@ class OpenClawWebSocket:
                 return False
 
         # Сбрасываем состояние стриминга перед новым запросом
-        with self._buffer_lock:
+        acquired = self._buffer_lock.acquire(timeout=3.0)
+        if acquired:
+            try:
+                self._full_response = ""
+                self._accumulated_text = ""
+                self._seen_final_run_ids.clear()
+            finally:
+                self._buffer_lock.release()
+        else:
+            self._log_ws("send_message: _buffer_lock timeout (3s), clearing without lock", "WARNING")
             self._full_response = ""
             self._accumulated_text = ""
-            self._seen_final_run_ids.clear()
         self._callback_mode = callback_mode if callback_mode in ("streaming", "blocking") else "streaming"
         self._response_event.clear()
         self._current_run_id = None
@@ -1334,7 +1393,15 @@ class OpenClawWebSocket:
         self._is_streaming = False
         self._is_processing = False
         self._current_run_id = None
-        with self._buffer_lock:
+        acquired = self._buffer_lock.acquire(timeout=3.0)
+        if acquired:
+            try:
+                self._accumulated_text = ""
+                self._full_response = ""
+            finally:
+                self._buffer_lock.release()
+        else:
+            self._log_ws("cancel: _buffer_lock timeout (3s), clearing without lock", "WARNING")
             self._accumulated_text = ""
             self._full_response = ""
         self._response_event.set()
