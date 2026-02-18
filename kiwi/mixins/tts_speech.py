@@ -187,6 +187,12 @@ class TTSSpeechMixin:
             def _ws_is_interrupted():
                 return self._barge_in_requested or not self.is_running
 
+            def _ws_on_connection_lost():
+                kiwi_log("KIWI", "ElevenLabs WS connection lost mid-stream", level="WARNING")
+                if self._task_status_announcer:
+                    self._task_status_announcer.stop()
+                    self._task_status_announcer = None
+
             self._streaming_tts_manager = ElevenLabsWSStreamManager(
                 api_key=self.config.tts_elevenlabs_api_key,
                 voice_id=self.config.tts_elevenlabs_voice_id,
@@ -198,6 +204,7 @@ class TTSSpeechMixin:
                 on_first_audio=_ws_on_first_audio,
                 on_playback_done=_ws_on_playback_done,
                 is_interrupted=_ws_is_interrupted,
+                on_connection_lost=_ws_on_connection_lost,
             )
             kiwi_log("KIWI", "Using ElevenLabs WS streaming", level="INFO")
         else:

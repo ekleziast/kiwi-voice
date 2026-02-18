@@ -41,6 +41,7 @@ class ElevenLabsWSStreamManager:
         on_first_audio: Optional[Callable] = None,
         on_playback_done: Optional[Callable] = None,
         is_interrupted: Optional[Callable[[], bool]] = None,
+        on_connection_lost: Optional[Callable] = None,
     ):
         self._api_key = api_key
         self._voice_id = voice_id
@@ -54,6 +55,7 @@ class ElevenLabsWSStreamManager:
         self._on_first_audio = on_first_audio
         self._on_playback_done = on_playback_done
         self._is_interrupted = is_interrupted
+        self._on_connection_lost = on_connection_lost
 
         self._ws = None
         self._buffer = ""
@@ -66,6 +68,7 @@ class ElevenLabsWSStreamManager:
         self._ws_connected = False
         self._eos_sent = False
         self._is_final_received = False
+        self.connection_lost = False
 
     # ------------------------------------------------------------------
     # Token cleaning (same logic as StreamingTTSManager._clean_token)
@@ -357,6 +360,13 @@ class ElevenLabsWSStreamManager:
                         break
                     kiwi_log("ELEVENLABS-WS",
                              f"Recv error: {exc}", level="ERROR")
+                    self.connection_lost = True
+                    self._ws_connected = False
+                    if self._on_connection_lost:
+                        try:
+                            self._on_connection_lost()
+                        except Exception:
+                            pass
                     break
 
                 if not raw:
