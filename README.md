@@ -45,7 +45,7 @@ Think of it as Alexa/Siri, but self-hosted, privacy-first, and plugged into your
 Mic → VAD + Energy Detection → Faster Whisper STT → Wake Word Check
   → Speaker ID (pyannote) → Priority Gate → Voice Security
   → OpenClaw Gateway (WebSocket) → LLM response stream
-  → Sentence-aware TTS → Speaker Output (with barge-in)
+  → Real-time streaming TTS → Speaker Output (with barge-in)
   → Back to listening
 ```
 
