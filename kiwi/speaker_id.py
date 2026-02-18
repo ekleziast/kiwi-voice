@@ -52,8 +52,8 @@ class SpeakerIdentifier:
     """
     
     # Пороги сходства (косинусное расстояние)
-    SIMILARITY_THRESHOLD = 0.70  # Выше = тот же говорящий
-    SELF_SIMILARITY_THRESHOLD = 0.75  # Строже для собственного голоса
+    SIMILARITY_THRESHOLD = 0.55  # Выше = тот же говорящий (0.70 was too strict for noisy home environments)
+    SELF_SIMILARITY_THRESHOLD = 0.65  # Строже для собственного голоса
     
     def __init__(self, profiles_dir: Optional[str] = None):
         """
@@ -269,30 +269,36 @@ class SpeakerIdentifier:
         
         best_match = None
         best_score = -1.0
-        
+        all_scores = {}
+
         for profile_id, profile in self.profiles.items():
             if exclude_self and profile_id == "self":
                 continue
-            
+
             profile_embedding = profile.get_average_embedding()
             if profile_embedding is None:
                 continue
-            
+
             similarity = self.cosine_similarity(embedding, profile_embedding)
-            
+            all_scores[profile_id] = similarity
+
             if similarity > best_score:
                 best_score = similarity
                 best_match = profile_id
-        
+
+        # Log all scores for diagnostics
+        scores_str = ", ".join(f"{k}={v:.3f}" for k, v in sorted(all_scores.items(), key=lambda x: -x[1]))
+        kiwi_log("SPEAKER-ID", f"Scores: [{scores_str}] best={best_match}({best_score:.3f})", level="DEBUG")
+
         # Определяем порог в зависимости от типа
         if best_match == "self":
             threshold = self.SELF_SIMILARITY_THRESHOLD
         else:
             threshold = self.SIMILARITY_THRESHOLD
-        
+
         if best_score >= threshold and best_match:
             return best_match, best_score
-        
+
         return "unknown", best_score
     
     def is_self_speaking(self, audio: np.ndarray, sample_rate: int = 16000) -> Tuple[bool, float]:

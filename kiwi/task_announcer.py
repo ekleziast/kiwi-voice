@@ -36,6 +36,10 @@ class TaskStatusAnnouncer:
         self._tts_is_playing = False
         self._lock = threading.Lock()
 
+        self._command = ""                 # original voice command for context
+        self._announced_text_len = 0       # track text already consumed by announcer
+        self._last_spoken_status = ""      # prevent exact same message twice in a row
+
         # Минимальный интервал между оповещениями (защита от спама)
         self._min_interval = 8.0
         self._activity_min_interval = 4.0
@@ -52,6 +56,9 @@ class TaskStatusAnnouncer:
             self._last_activity_time = 0.0
             self._stop_event.clear()
             self._tts_is_playing = False
+            self._command = command
+            self._announced_text_len = 0
+            self._last_spoken_status = ""
 
         # Запускаем фоновый поток мониторинга
         self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
@@ -91,11 +98,20 @@ class TaskStatusAnnouncer:
         self._announce_pending_activity()
 
     def stop(self):
-        """Останавливает мониторинг."""
+        """Останавливает мониторинг (блокирующий — ждёт завершения потока)."""
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
         kiwi_log("STATUS-ANNOUNCER", "Stopped", level="INFO")
+
+    def stop_nowait(self):
+        """Останавливает мониторинг без ожидания (неблокирующий).
+
+        Используется из _on_llm_token, где блокировка на 2с недопустима,
+        т.к. задерживает все последующие LLM токены.
+        """
+        self._stop_event.set()
+        kiwi_log("STATUS-ANNOUNCER", "Stop requested (nowait)", level="INFO")
 
     def _monitor_loop(self):
         """Фоновый поток мониторинга."""
@@ -158,45 +174,52 @@ class TaskStatusAnnouncer:
         """Генерирует статусное сообщение на основе контекста.
 
         IMPORTANT: caller must hold self._lock already.
+
+        Logic:
+        1. Check for NEW text (beyond _announced_text_len)
+        2. If new text found → extract last sentence → use if informative
+        3. If no new text → use index-based varied fallbacks (unique per interval)
+        4. Never repeat the exact same message twice in a row
         """
         text = self._last_text
+        new_text = ""
 
-        # Если текста нет — используем общие фразы
-        if not text or len(text) < 10:
-            if elapsed < 15:
-                return "Думаю над ответом..."
-            elif elapsed < 40:
-                return "Задача сложная, работаю..."
-            elif elapsed < 90:
-                return "Всё ещё работаю над этим..."
-            else:
-                return "Продолжаю работу..."
+        if text and len(text) > self._announced_text_len:
+            new_text = text[self._announced_text_len:]
+            self._announced_text_len = len(text)
 
-        # Если есть текст — извлекаем последнее предложение как контекст
-        sentences = [s.strip() for s in text.split('.') if s.strip()]
-        if sentences:
-            last_sentence = sentences[-1]
+        # Try to extract an informative sentence from new text
+        if new_text and len(new_text.strip()) >= 20:
+            # Split on sentence boundaries
+            for sep in ['. ', '! ', '? ', '\n']:
+                parts = new_text.rsplit(sep, 1)
+                if len(parts) > 1:
+                    new_text = parts[-1]
 
-            # Обрезаем если слишком длинное
-            if len(last_sentence) > 80:
-                # Берём первые 60 символов + "..."
-                last_sentence = last_sentence[:60].rsplit(' ', 1)[0] + "..."
+            candidate = new_text.strip().rstrip('.')
+            if len(candidate) > 80:
+                candidate = candidate[:60].rsplit(' ', 1)[0] + "..."
 
-            # Если предложение описывает действие — озвучиваем его
-            action_keywords = [
-                'анализирую', 'проверяю', 'ищу', 'создаю', 'исправляю',
-                'читаю', 'пишу', 'обрабатываю', 'загружаю', 'сохраняю',
-                'компилирую', 'тестирую', 'запускаю', 'останавливаю',
-                'устанавливаю', 'удаляю', 'обновляю', 'настраиваю'
-            ]
+            if len(candidate) >= 20 and candidate != self._last_spoken_status:
+                self._last_spoken_status = candidate
+                return candidate
 
-            if any(keyword in last_sentence.lower() for keyword in action_keywords):
-                return last_sentence
+        # Fallback: index-based varied messages — each interval gets a unique one
+        fallbacks = [
+            "Думаю над ответом...",
+            "Обрабатываю запрос, подождите...",
+            "Всё ещё работаю, скоро будет результат...",
+            "Продолжаю, это занимает время...",
+            "Почти закончила...",
+        ]
 
-        # Fallback: общая фраза с намёком на прогресс
-        if elapsed < 40:
-            return "Работаю над задачей..."
-        elif elapsed < 90:
-            return "Всё ещё работаю..."
-        else:
-            return "Продолжаю..."
+        idx = len(self._announced_intervals) % len(fallbacks)
+        candidate = fallbacks[idx]
+
+        # If this would repeat the last spoken status, advance to next variant
+        if candidate == self._last_spoken_status:
+            idx = (idx + 1) % len(fallbacks)
+            candidate = fallbacks[idx]
+
+        self._last_spoken_status = candidate
+        return candidate

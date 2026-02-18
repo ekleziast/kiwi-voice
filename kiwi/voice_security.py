@@ -205,31 +205,42 @@ class TelegramApprovalClient:
     def _poll_loop(self):
         """Polling loop для получения callback от Inline Keyboard."""
         last_offset = 0
-        
+        backoff = 5
+        consecutive_errors = 0
+
         while self._running:
             try:
-                # Получаем обновления
                 url = self.API_URL + "getUpdates"
                 params = {
                     "offset": last_offset,
                     "timeout": 30,
                     "allowed_updates": ["callback_query"]
                 }
-                
+
                 response = requests.post(url, json=params, timeout=35)
                 data = response.json()
-                
+
                 if data.get("ok"):
                     for update in data.get("result", []):
                         last_offset = update["update_id"] + 1
-                        
+
                         callback = update.get("callback_query")
                         if callback:
                             self._handle_callback(callback)
-                
+
+                # Reset backoff on success
+                consecutive_errors = 0
+                backoff = 5
+
             except Exception as e:
-                kiwi_log("VOICE_SECURITY", f"Polling error: {e}", level="ERROR")
-                time.sleep(5)
+                consecutive_errors += 1
+                if consecutive_errors <= 3:
+                    kiwi_log("VOICE_SECURITY", f"Polling error ({consecutive_errors}): {e}", level="ERROR")
+                elif consecutive_errors == 4:
+                    kiwi_log("VOICE_SECURITY", f"Telegram unreachable after {consecutive_errors} attempts, reducing poll frequency", level="WARNING")
+                # Exponential backoff: 5 → 10 → 20 → 40 → ... → max 300s
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 300)
     
     def _handle_callback(self, callback: dict):
         """Обрабатывает нажатие кнопки."""

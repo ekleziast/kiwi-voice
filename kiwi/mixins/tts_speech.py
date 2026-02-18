@@ -137,6 +137,10 @@ class TTSSpeechMixin:
         from kiwi.tts.streaming import StreamingTTSManager
         from kiwi.task_announcer import TaskStatusAnnouncer
 
+        # Critical: reset barge-in flag so the new WS playback worker
+        # doesn't see a stale True from a previous interaction and exit immediately.
+        self._barge_in_requested = False
+
         if self._streaming_tts_manager:
             kiwi_log("KIWI", "Stopping previous StreamingTTSManager", level="INFO")
             self._streaming_tts_manager.stop(graceful=False)
@@ -225,6 +229,29 @@ class TTSSpeechMixin:
             speak_func=self._speak_chunk,
             intervals=[6, 20, 45, 90, 150]
         )
+
+        # Replace speak_func with a stop-aware wrapper that checks the
+        # announcer's _stop_event between synthesis and playback.
+        # Without this, a long REST TTS call (4-5s) that started before
+        # stop_nowait() can still play audio after the response was
+        # interrupted by barge-in.
+        _stop_ev = self._task_status_announcer._stop_event
+
+        def _announcer_speak(chunk: str):
+            if self._is_speaking:
+                return
+            result = self._synthesize_chunk(chunk)
+            if not result:
+                return
+            if _stop_ev.is_set():
+                kiwi_log("TTS-CHUNK", "Skipping announcer playback: stopped during synthesis", level="INFO")
+                return
+            audio, sample_rate = result
+            if self._is_speaking:
+                return
+            self._play_audio_chunk_streaming(audio, sample_rate)
+
+        self._task_status_announcer.speak_func = _announcer_speak
         self._task_status_announcer.start(command)
 
     # ------------------------------------------------------------------

@@ -13,10 +13,19 @@ class LLMCallbacksMixin:
         """Callback on each token from the LLM (WebSocket delta event)."""
         if token:
             with self._stream_watchdog_lock:
+                first_token = not self._stream_watchdog_first_token_seen
                 self._stream_watchdog_first_token_seen = True
                 self._stream_watchdog_token_count += 1
                 self._stream_watchdog_total_chars += len(token)
                 self._stream_watchdog_last_token_ts = time.time()
+
+            # Stop the status announcer on first real text — response is streaming,
+            # no need for "Думаю над ответом..." status messages anymore.
+            # Use stop_nowait() to avoid blocking LLM token delivery for 2s
+            # while the announcer thread finishes its REST TTS call.
+            if first_token and self._task_status_announcer:
+                self._task_status_announcer.stop_nowait()
+                self._task_status_announcer = None
 
         if self._streaming_tts_manager:
             self._streaming_tts_manager.on_token(token)

@@ -120,9 +120,9 @@ realtime:
   post_tts_dead_zone: 2.5
 
   # Barge-in
-  barge_in_chunks_required: 3
-  barge_in_volume_multiplier: 3.5
-  barge_in_min_volume: 0.025
+  barge_in_chunks_required: 5
+  barge_in_volume_multiplier: 5.0
+  barge_in_min_volume: 0.045
   barge_in_grace_period: 0.35
 
   # Adaptive pause (longer speech → longer allowed pause)

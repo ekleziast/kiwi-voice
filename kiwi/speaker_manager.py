@@ -132,7 +132,7 @@ class SpeakerManager:
     
     # Настройки
     AUTO_LEARN_THRESHOLD = 0.85  # Авто-запоминание при такой уверенности
-    IDENTIFY_THRESHOLD = 0.70     # Минимум для распознавания
+    IDENTIFY_THRESHOLD = 0.55     # Минимум для распознавания (0.70 was too strict)
     HOT_CACHE_SIZE = 10           # Размер горячего кэша
     CONTEXT_TIMEOUT = 30.0        # Таймаут контекста (сек)
     
@@ -386,62 +386,67 @@ class SpeakerManager:
     def identify_speaker_fast(self, audio: np.ndarray, sample_rate: int = 16000) -> Tuple[str, VoicePriority, float, str]:
         """
         Быстрая идентификация говорящего с приоритетом.
-        
+
         Использует hot cache для мгновенного ответа.
-        
+
         Returns:
             (speaker_id, priority, confidence, display_name)
         """
-        # Проверяем hot cache
-        if self.base_identifier:
-            embedding = self.base_identifier.extract_embedding(audio, sample_rate)
-            
-            if embedding is not None:
-                # Сначала проверяем hot cache
-                with self._hot_cache_lock:
-                    cache_items = list(self._hot_cache.items())
-                
-                best_id = None
-                best_score = 0.0
-                
-                for sid, cached_emb in cache_items:
-                    if sid in self.profiles and self.profiles[sid].is_blocked:
-                        continue  # Пропускаем заблокированных
-                    
-                    score = self.base_identifier.cosine_similarity(embedding, cached_emb)
-                    if score > best_score:
-                        best_score = score
-                        best_id = sid
-                
-                # Проверяем порог для hot cache
-                if best_id and best_score >= self.IDENTIFY_THRESHOLD:
-                    priority = self._get_priority(best_id)
-                    name = self.profiles.get(best_id, ExtendedSpeakerProfile(name=best_id, embeddings=[], priority="guest")).display_name or best_id
-                    return best_id, priority, best_score, name
-                
-                # Если не найден в кэше - полное сканирование
-                speaker_id, score = self.base_identifier.identify_speaker(audio, sample_rate)
-                
-                if speaker_id != "unknown" and score >= self.IDENTIFY_THRESHOLD:
-                    priority = self._get_priority(speaker_id)
-                    
-                    # Проверяем блокировку
-                    if speaker_id in self.profiles and self.profiles[speaker_id].is_blocked:
-                        return speaker_id, VoicePriority.BLOCKED, score, self.profiles[speaker_id].display_name
-                    
-                    # Добавляем в hot cache
-                    with self._hot_cache_lock:
-                        self._hot_cache[speaker_id] = embedding
-                        # Ограничиваем размер кэша
-                        if len(self._hot_cache) > self.HOT_CACHE_SIZE:
-                            oldest = next(iter(self._hot_cache))
-                            del self._hot_cache[oldest]
-                    
-                    name = self.profiles.get(speaker_id, ExtendedSpeakerProfile(name=speaker_id, embeddings=[], priority="guest")).display_name or speaker_id
-                    return speaker_id, priority, score, name
-        
-        # Неизвестный голос
-        return "unknown", VoicePriority.GUEST, 0.0, "Незнакомец"
+        if not self.base_identifier:
+            return "unknown", VoicePriority.GUEST, 0.0, "Незнакомец"
+
+        embedding = self.base_identifier.extract_embedding(audio, sample_rate)
+
+        if embedding is None:
+            kiwi_log("SPEAKER_MANAGER", "Embedding extraction returned None", level="WARNING")
+            return "unknown", VoicePriority.GUEST, 0.0, "Незнакомец"
+
+        # Сначала проверяем hot cache
+        with self._hot_cache_lock:
+            cache_items = list(self._hot_cache.items())
+
+        best_id = None
+        best_score = 0.0
+
+        for sid, cached_emb in cache_items:
+            if sid in self.profiles and self.profiles[sid].is_blocked:
+                continue
+            score = self.base_identifier.cosine_similarity(embedding, cached_emb)
+            if score > best_score:
+                best_score = score
+                best_id = sid
+
+        # Проверяем порог для hot cache
+        if best_id and best_score >= self.IDENTIFY_THRESHOLD:
+            priority = self._get_priority(best_id)
+            name = self.profiles.get(best_id, ExtendedSpeakerProfile(name=best_id, embeddings=[], priority="guest")).display_name or best_id
+            kiwi_log("SPEAKER_MANAGER", f"Hot-cache hit: {best_id} score={best_score:.3f}", level="DEBUG")
+            return best_id, priority, best_score, name
+
+        # Если не найден в кэше - полное сканирование
+        speaker_id, score = self.base_identifier.identify_speaker(audio, sample_rate)
+
+        if speaker_id != "unknown" and score >= self.IDENTIFY_THRESHOLD:
+            priority = self._get_priority(speaker_id)
+
+            # Проверяем блокировку
+            if speaker_id in self.profiles and self.profiles[speaker_id].is_blocked:
+                return speaker_id, VoicePriority.BLOCKED, score, self.profiles[speaker_id].display_name
+
+            # Добавляем в hot cache
+            with self._hot_cache_lock:
+                self._hot_cache[speaker_id] = embedding
+                if len(self._hot_cache) > self.HOT_CACHE_SIZE:
+                    oldest = next(iter(self._hot_cache))
+                    del self._hot_cache[oldest]
+
+            name = self.profiles.get(speaker_id, ExtendedSpeakerProfile(name=speaker_id, embeddings=[], priority="guest")).display_name or speaker_id
+            kiwi_log("SPEAKER_MANAGER", f"Identified: {speaker_id} score={score:.3f}", level="DEBUG")
+            return speaker_id, priority, score, name
+
+        # Неизвестный — возвращаем РЕАЛЬНЫЙ лучший score (не 0.0) для диагностики
+        kiwi_log("SPEAKER_MANAGER", f"Below threshold: best={speaker_id} score={score:.3f} (thr={self.IDENTIFY_THRESHOLD})", level="DEBUG")
+        return "unknown", VoicePriority.GUEST, score, "Незнакомец"
     
     def _get_priority(self, speaker_id: str) -> VoicePriority:
         """Определяет приоритет по speaker_id."""
