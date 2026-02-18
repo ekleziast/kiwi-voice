@@ -195,6 +195,12 @@ kiwi-voice/
 │   ├── unified_vad.py       # Voice Activity Detection
 │   ├── hardware_aec.py      # Acoustic Echo Cancellation
 │   ├── task_announcer.py    # Long-running task status announcer
+│   ├── mixins/              # Service mixin modules
+│   │   ├── audio_playback.py    # Audio output and playback control
+│   │   ├── dialogue_pipeline.py # LLM dialogue orchestration
+│   │   ├── llm_callbacks.py     # LLM streaming callbacks
+│   │   ├── stream_watchdog.py   # Stream stall detection and recovery
+│   │   └── tts_speech.py        # TTS synthesis and streaming playback
 │   └── tts/                 # TTS providers
 │       ├── elevenlabs.py
 │       ├── elevenlabs_ws.py  # WebSocket input streaming

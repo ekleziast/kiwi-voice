@@ -189,6 +189,12 @@ kiwi-voice/
 │   ├── unified_vad.py       # Детекция голосовой активности
 │   ├── hardware_aec.py      # Подавление эха
 │   ├── task_announcer.py    # Оповещения о долгих задачах
+│   ├── mixins/              # Миксины сервиса
+│   │   ├── audio_playback.py    # Воспроизведение аудио
+│   │   ├── dialogue_pipeline.py # Оркестрация диалога с LLM
+│   │   ├── llm_callbacks.py     # Колбэки потокового LLM
+│   │   ├── stream_watchdog.py   # Детекция зависаний потока
+│   │   └── tts_speech.py        # Синтез и потоковая озвучка
 │   └── tts/                 # Движки озвучки
 │       ├── elevenlabs.py
 │       ├── elevenlabs_ws.py  # WebSocket-стриминг
