@@ -37,6 +37,7 @@ class ElevenLabsWSStreamManager:
         playback_callback: Callable[[np.ndarray, int], None],
         speed: float = 1.0,
         inactivity_timeout: float = 60.0,
+        playback_buffer_s: float = 1.0,
     ):
         self._api_key = api_key
         self._voice_id = voice_id
@@ -45,6 +46,7 @@ class ElevenLabsWSStreamManager:
         self._speed = speed
         self._playback_callback = playback_callback
         self._inactivity_timeout = inactivity_timeout
+        self._playback_buffer_s = max(0.2, float(playback_buffer_s))
 
         self._ws = None
         self._buffer = ""
@@ -400,8 +402,13 @@ class ElevenLabsWSStreamManager:
     # ------------------------------------------------------------------
 
     def _playback_worker(self):
-        """Play audio chunks as they arrive from the recv thread."""
+        """Accumulate audio into buffer, play in ~1s batches for smooth output."""
         chunks_played = 0
+        pending: list = []       # list of np arrays
+        pending_samples = 0      # total samples in pending
+        min_samples = int(self._playback_buffer_s * _WS_SAMPLE_RATE)
+        stream_ended = False
+
         try:
             while True:
                 if self._stop_event.is_set():
@@ -409,26 +416,55 @@ class ElevenLabsWSStreamManager:
                              "Playback stopped by event", level="INFO")
                     break
 
+                # Try to drain the queue into the pending buffer
                 try:
-                    item = self._audio_queue.get(timeout=0.2)
+                    item = self._audio_queue.get(timeout=0.1)
                 except Exception:
-                    # queue.Empty
-                    continue
+                    # queue.Empty — if we have pending audio and stream ended, flush
+                    if stream_ended and pending:
+                        pass  # fall through to play
+                    else:
+                        continue
 
                 if item is None:
-                    break
+                    stream_ended = True
+                else:
+                    audio, _sr = item
+                    if audio is not None and len(audio) > 0:
+                        pending.append(audio)
+                        pending_samples += len(audio)
+
+                # Decide whether to play
+                should_play = (
+                    (pending_samples >= min_samples)
+                    or (stream_ended and pending)
+                )
+
+                if not should_play:
+                    continue
 
                 if self._stop_event.is_set():
                     break
 
-                audio, sample_rate = item
-                if audio is not None and len(audio) > 0:
-                    try:
-                        self._playback_callback(audio, sample_rate)
-                        chunks_played += 1
-                    except Exception as exc:
-                        kiwi_log("ELEVENLABS-WS",
-                                 f"Playback error: {exc}", level="ERROR")
+                # Concatenate and play
+                combined = np.concatenate(pending) if len(pending) > 1 else pending[0]
+                pending.clear()
+                pending_samples = 0
+
+                try:
+                    dur = len(combined) / _WS_SAMPLE_RATE
+                    kiwi_log("ELEVENLABS-WS",
+                             f"Playing buffered chunk ({dur:.2f}s)",
+                             level="DEBUG")
+                    self._playback_callback(combined, _WS_SAMPLE_RATE)
+                    chunks_played += 1
+                except Exception as exc:
+                    kiwi_log("ELEVENLABS-WS",
+                             f"Playback error: {exc}", level="ERROR")
+
+                if stream_ended:
+                    break
+
         except Exception as exc:
             kiwi_log("ELEVENLABS-WS",
                      f"Playback worker error: {exc}", level="ERROR")
