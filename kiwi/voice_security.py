@@ -314,7 +314,25 @@ class TelegramApprovalClient:
                 callback(True, approval)
         
         return callback_data
-    
+
+    def send_notification(self, message: str):
+        """Send a plain Telegram message without inline keyboard buttons (for alerts)."""
+        if not self.is_configured():
+            kiwi_log("VOICE_SECURITY", f"Notification (fallback): {message}")
+            return
+        try:
+            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+            data = {
+                "chat_id": self.chat_id,
+                "text": message,
+                "parse_mode": "Markdown",
+            }
+            response = requests.post(url, json=data, timeout=10)
+            if not response.json().get("ok"):
+                kiwi_log("VOICE_SECURITY", f"Telegram notification error: {response.text}", level="ERROR")
+        except Exception as e:
+            kiwi_log("VOICE_SECURITY", f"Telegram notification error: {e}", level="ERROR")
+
     def _send_telegram_message(self, message: str, callback_data: str):
         """Отправляет сообщение с inline keyboard."""
         try:
@@ -448,6 +466,10 @@ class VoiceSecurity:
         # SAFE команды выполняются
         return True, warning
     
+    def notify(self, message: str):
+        """Send a plain notification to Telegram (no approval buttons)."""
+        self.telegram.send_notification(message)
+
     def stop(self):
         """Останавливает все процессы."""
         if self._cleanup_timer:

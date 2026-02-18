@@ -321,6 +321,15 @@ class KiwiServiceOpenClaw(
             self.listener.speaker_manager.OWNER_NAME = self._owner_name
         kiwi_log("LISTENER", "Initialized Kiwi Listener", level="INFO")
 
+        # Voice Security with Telegram approval
+        self._voice_security = None
+        if VOICE_SECURITY_AVAILABLE:
+            try:
+                self._voice_security = VoiceSecurity()
+                kiwi_log("KIWI", "Voice Security with Telegram approval initialized", level="INFO")
+            except Exception as e:
+                kiwi_log("KIWI", f"Voice Security init failed: {e}", level="WARNING")
+
         # Состояние сервиса
         self.is_running = False
 
@@ -520,6 +529,9 @@ class KiwiServiceOpenClaw(
             self._task_status_announcer = None
 
         self._cancel_idle_timer()
+
+        if getattr(self, '_voice_security', None):
+            self._voice_security.stop()
 
         self.listener.stop()
         kiwi_log("KIWI", "Kiwi Voice Service stopped", level="INFO")

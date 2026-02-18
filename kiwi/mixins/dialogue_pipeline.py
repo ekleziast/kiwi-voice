@@ -119,8 +119,7 @@ class DialoguePipelineMixin:
                 kiwi_log("APPROVAL", f"Pending request expired ({age:.1f}s)", level="INFO")
                 self._pending_owner_approval = None
 
-        fallback_owner_phrase = (not ctx.owner_profile_ready) and (self._owner_name.lower() in ctx.command_lower)
-        if self._pending_owner_approval and (ctx.is_owner or fallback_owner_phrase):
+        if self._pending_owner_approval and ctx.is_owner:
             if self._approval_yes(ctx.command_lower):
                 ctx.approved_command_from_owner = str(self._pending_owner_approval.get("command", "")).strip()
                 requester = str(self._pending_owner_approval.get("speaker_name", "кто-то"))
@@ -166,6 +165,14 @@ class DialoguePipelineMixin:
         if _on and _on != "owner":
             owner_register_words.extend([f"это {_on}", f"я {_on}"])
         if any(word in ctx.command_lower for word in owner_register_words):
+            if ctx.owner_profile_ready and not ctx.is_owner:
+                kiwi_log("SECURITY", f"Non-owner '{ctx.speaker_name}' attempted owner registration — DENIED", level="WARNING")
+                self._notify_owner_security_event(
+                    f"Попытка перерегистрации владельца от {ctx.speaker_name}: '{ctx.command}'"
+                )
+                self.speak("Владелец уже зарегистрирован. Только он может изменить голосовой профиль.", style="calm")
+                ctx.abort = True
+                return
             if hasattr(self.listener, "register_owner_voice"):
                 success = self.listener.register_owner_voice(self._owner_name)
                 if success:
@@ -194,6 +201,11 @@ class DialoguePipelineMixin:
             return
 
         if "запомни меня как" in ctx.command_lower or "это мой друг" in ctx.command_lower:
+            if ctx.owner_profile_ready and not ctx.is_owner:
+                kiwi_log("SECURITY", f"Non-owner '{ctx.speaker_name}' attempted to add friend — DENIED", level="WARNING")
+                self.speak("Только владелец может добавлять новых людей.", style="calm")
+                ctx.abort = True
+                return
             name = self._extract_name_from_voice_command(ctx.command)
             if not name:
                 self.speak("Скажи имя после фразы: запомни меня как ...", style="neutral")
@@ -289,9 +301,29 @@ class DialoguePipelineMixin:
                 "timestamp": time.time(),
             }
             kiwi_log("APPROVAL", f"Pending owner approval for speaker={ctx.speaker_name}, command='{ctx.command}'", level="INFO")
-            approve_hint = "Скажи: разрешаю или запрещаю."
-            if not ctx.owner_profile_ready:
-                approve_hint = f"Скажи: {self._owner_name}, разрешаю. Или: {self._owner_name}, запрещаю."
+
+            # Send Telegram approval request if configured
+            voice_security = getattr(self, '_voice_security', None)
+            telegram_available = voice_security and voice_security.telegram.is_configured()
+            if telegram_available:
+                voice_security.telegram.send_approval_request(
+                    command=ctx.command,
+                    speaker_id=ctx.speaker_id,
+                    speaker_name=ctx.speaker_name,
+                    callback=self._on_telegram_approval_decision,
+                )
+                kiwi_log("APPROVAL", "Telegram approval request sent", level="INFO")
+
+            # Build approval hint based on available channels
+            if ctx.owner_profile_ready and telegram_available:
+                approve_hint = "Скажи: разрешаю. Или подтвердите в Telegram."
+            elif ctx.owner_profile_ready:
+                approve_hint = "Скажи: разрешаю или запрещаю."
+            elif telegram_available:
+                approve_hint = "Подтвердите в Telegram."
+            else:
+                approve_hint = f"Зарегистрируйте голос владельца: Киви, я хозяин."
+
             self.speak(
                 f"{self._owner_name}, {ctx.speaker_name} просит: {ctx.command}. "
                 f"{approve_hint}",
@@ -478,3 +510,26 @@ class DialoguePipelineMixin:
             return None
         name = match.group(1).strip()
         return name[:1].upper() + name[1:]
+
+    def _on_telegram_approval_decision(self, approved, approval_data):
+        """Called from Telegram polling thread when owner presses Approve/Deny."""
+        if not self._pending_owner_approval:
+            return  # Already resolved by voice or expired
+        command = self._pending_owner_approval.get("command", "")
+        speaker_name = self._pending_owner_approval.get("speaker_name", "кто-то")
+        self._pending_owner_approval = None
+        if approved:
+            self.speak(f"Telegram подтвердил. Выполняю запрос от {speaker_name}.", style="confident")
+            ctx = CommandContext(command=command)
+            ctx.command_lower = command.lower().strip()
+            ctx.approved_command_from_owner = command
+            self._stage_dispatch_to_llm(ctx)
+        else:
+            self.speak(f"Запрос от {speaker_name} отклонён через Telegram.", style="calm")
+
+    def _notify_owner_security_event(self, message):
+        """Send security alerts to Telegram (no approval buttons)."""
+        kiwi_log("SECURITY", message, level="WARNING")
+        voice_security = getattr(self, '_voice_security', None)
+        if voice_security:
+            voice_security.notify(f"\U0001f512 *Киви — Безопасность*\n\n{message}")
