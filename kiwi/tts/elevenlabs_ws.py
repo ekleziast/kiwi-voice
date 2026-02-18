@@ -8,7 +8,6 @@ directly as they arrive from the LLM, receiving audio back in real-time.
 import base64
 import json
 import re
-import struct
 import threading
 import time
 from typing import Any, Callable, Dict, Optional
@@ -38,15 +37,23 @@ class ElevenLabsWSStreamManager:
         speed: float = 1.0,
         inactivity_timeout: float = 60.0,
         playback_buffer_s: float = 1.0,
+        output_device: Optional[Any] = None,
+        on_first_audio: Optional[Callable] = None,
+        on_playback_done: Optional[Callable] = None,
+        is_interrupted: Optional[Callable[[], bool]] = None,
     ):
         self._api_key = api_key
         self._voice_id = voice_id
         self._model_id = model_id
         self._voice_settings = dict(voice_settings)
         self._speed = speed
-        self._playback_callback = playback_callback
+        self._playback_callback = playback_callback  # kept for API compat
         self._inactivity_timeout = inactivity_timeout
         self._playback_buffer_s = max(0.2, float(playback_buffer_s))
+        self._output_device = output_device
+        self._on_first_audio = on_first_audio
+        self._on_playback_done = on_playback_done
+        self._is_interrupted = is_interrupted
 
         self._ws = None
         self._buffer = ""
@@ -402,105 +409,134 @@ class ElevenLabsWSStreamManager:
     # ------------------------------------------------------------------
 
     def _playback_worker(self):
-        """Accumulate audio into buffer, play in batches for smooth output.
+        """Gapless playback via a single continuous sd.OutputStream.
 
-        Two thresholds:
-        - min_samples  (~1s): target batch size for normal playback
-        - min_play     (~0.3s): absolute floor — never send anything shorter
-          to sd.play() to avoid audible micro-fragments.  Only the very last
-          piece of the stream is exempt from the floor.
+        Opens one OutputStream on the first audio and feeds it with
+        stream.write() — no gaps between batches because the underlying
+        PortAudio stream never stops.  Audio is written in 100 ms
+        sub-chunks so barge-in is checked every ~100 ms.
         """
         import queue as _queue
+        import sounddevice as sd
 
-        chunks_played = 0
-        pending: list = []       # list of np arrays
-        pending_samples = 0      # total samples in pending
+        batches_played = 0
+        pending: list = []
+        pending_samples = 0
         min_samples = int(self._playback_buffer_s * _WS_SAMPLE_RATE)
-        min_play = int(0.3 * _WS_SAMPLE_RATE)  # 300ms hard floor
         stream_ended = False
+        stream = None
+        notified_start = False
+        interrupted = False
 
         try:
             while True:
+                # --- check stop / barge-in ---
                 if self._stop_event.is_set():
-                    kiwi_log("ELEVENLABS-WS",
-                             "Playback stopped by event", level="INFO")
+                    interrupted = True
+                    break
+                if self._is_interrupted and self._is_interrupted():
+                    interrupted = True
                     break
 
-                # --- drain queue aggressively --------------------------------
-                # Block up to 0.1s for the first item only when the pending
-                # buffer is empty; after that do non-blocking bulk drain so we
-                # never sit idle with audio waiting in the queue.
+                # --- drain queue aggressively ---
                 wait = 0.1 if not pending else 0.0
-                drained = 0
                 while True:
                     try:
                         item = self._audio_queue.get(timeout=wait)
                     except _queue.Empty:
                         break
-
                     if item is None:
                         stream_ended = True
                         break
-
                     audio, _sr = item
                     if audio is not None and len(audio) > 0:
                         pending.append(audio)
                         pending_samples += len(audio)
-                        drained += 1
-
-                    # After first successful get, switch to non-blocking
                     wait = 0.0
-
-                    # Stop draining once we have enough for a batch
                     if pending_samples >= min_samples:
                         break
 
-                # --- decide whether to play -----------------------------------
+                # --- decide whether to write ---
                 if not pending:
                     if stream_ended:
                         break
                     continue
 
-                enough = pending_samples >= min_samples
-                is_final_flush = stream_ended
-
-                if not enough and not is_final_flush:
-                    # Not enough audio yet and stream still going — wait more
+                if pending_samples < min_samples and not stream_ended:
                     continue
 
                 if self._stop_event.is_set():
+                    interrupted = True
                     break
 
-                # Concatenate accumulated fragments into one array
+                # Concatenate batch
                 combined = np.concatenate(pending) if len(pending) > 1 else pending[0]
                 pending.clear()
                 pending_samples = 0
 
-                # Guard against micro-fragments (< 300ms) mid-stream.
-                # Keep them in the buffer to merge with the next batch.
-                if len(combined) < min_play and not is_final_flush:
-                    pending.append(combined)
-                    pending_samples = len(combined)
-                    continue
+                # Normalize
+                if combined.dtype != np.float32:
+                    combined = combined.astype(np.float32)
+                peak = float(np.max(np.abs(combined))) if combined.size else 0.0
+                if peak > 1.0:
+                    combined = combined / peak
+                elif 0.0 < peak < 0.20:
+                    gain = min(3.0, 0.35 / peak)
+                    combined = np.clip(combined * gain, -1.0, 1.0).astype(np.float32)
 
-                try:
-                    dur = len(combined) / _WS_SAMPLE_RATE
-                    kiwi_log("ELEVENLABS-WS",
-                             f"Playing buffered chunk ({dur:.2f}s)",
-                             level="DEBUG")
-                    self._playback_callback(combined, _WS_SAMPLE_RATE)
-                    chunks_played += 1
-                except Exception as exc:
-                    kiwi_log("ELEVENLABS-WS",
-                             f"Playback error: {exc}", level="ERROR")
+                # Open stream on first audio
+                if stream is None:
+                    stream = sd.OutputStream(
+                        samplerate=_WS_SAMPLE_RATE,
+                        channels=1,
+                        dtype="float32",
+                        device=self._output_device,
+                    )
+                    stream.start()
+                    if self._on_first_audio:
+                        self._on_first_audio()
+                    notified_start = True
+                    kiwi_log("ELEVENLABS-WS", "OutputStream opened", level="INFO")
 
-                if is_final_flush:
+                # Write in 100 ms sub-chunks for responsive barge-in
+                sub_size = int(0.1 * _WS_SAMPLE_RATE)  # 2400 samples
+                for i in range(0, len(combined), sub_size):
+                    if self._stop_event.is_set():
+                        interrupted = True
+                        break
+                    if self._is_interrupted and self._is_interrupted():
+                        interrupted = True
+                        break
+                    sub = combined[i:i + sub_size]
+                    stream.write(sub.reshape(-1, 1))
+
+                dur = len(combined) / _WS_SAMPLE_RATE
+                kiwi_log("ELEVENLABS-WS",
+                         f"Wrote {dur:.2f}s to stream", level="DEBUG")
+                batches_played += 1
+
+                if interrupted or stream_ended:
                     break
 
         except Exception as exc:
             kiwi_log("ELEVENLABS-WS",
                      f"Playback worker error: {exc}", level="ERROR")
         finally:
+            if stream:
+                try:
+                    if interrupted:
+                        stream.abort()
+                    else:
+                        stream.stop()
+                    stream.close()
+                except Exception:
+                    pass
+                kiwi_log("ELEVENLABS-WS", "OutputStream closed", level="INFO")
+            if notified_start and self._on_playback_done:
+                try:
+                    self._on_playback_done()
+                except Exception:
+                    pass
             kiwi_log("ELEVENLABS-WS",
-                     f"Playback worker exited ({chunks_played} chunks played)",
+                     f"Playback worker exited ({batches_played} batches)",
                      level="INFO")

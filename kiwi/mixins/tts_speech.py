@@ -161,6 +161,32 @@ class TTSSpeechMixin:
                 "use_speaker_boost": self.config.tts_elevenlabs_use_speaker_boost,
             }
 
+            def _ws_on_first_audio():
+                self._streaming_response_playback_started = True
+                self._is_speaking = True
+                self._barge_in_requested = False
+                if hasattr(self, "listener") and self.listener:
+                    self.listener._tts_start_time = time.time()
+                    self.listener._barge_in_counter = 0
+                try:
+                    if self._task_status_announcer:
+                        self._task_status_announcer.on_tts_playing(True)
+                except Exception:
+                    pass
+
+            def _ws_on_playback_done():
+                self._is_speaking = False
+                if hasattr(self, "listener") and self.listener:
+                    self.listener._tts_start_time = time.time()
+                try:
+                    if self._task_status_announcer:
+                        self._task_status_announcer.on_tts_playing(False)
+                except Exception:
+                    pass
+
+            def _ws_is_interrupted():
+                return self._barge_in_requested or not self.is_running
+
             self._streaming_tts_manager = ElevenLabsWSStreamManager(
                 api_key=self.config.tts_elevenlabs_api_key,
                 voice_id=self.config.tts_elevenlabs_voice_id,
@@ -168,6 +194,10 @@ class TTSSpeechMixin:
                 voice_settings=voice_settings,
                 playback_callback=self._play_streaming_response_chunk,
                 speed=self.config.tts_elevenlabs_speed,
+                output_device=self.config.output_device,
+                on_first_audio=_ws_on_first_audio,
+                on_playback_done=_ws_on_playback_done,
+                is_interrupted=_ws_is_interrupted,
             )
             kiwi_log("KIWI", "Using ElevenLabs WS streaming", level="INFO")
         else:
