@@ -123,7 +123,7 @@ python -m kiwi
 
 | Provider | Quality | Latency | Cost | Local GPU |
 |----------|---------|---------|------|-----------|
-| **ElevenLabs** | Excellent | ~1–2s | ~$0.30/1K chars | No |
+| **ElevenLabs** | Excellent | ~0.3–0.5s | ~$0.30/1K chars | No |
 | **Qwen3-TTS (local)** | High | ~1–3s | Free | Yes (CUDA) |
 | **Qwen3-TTS (RunPod)** | High | ~2–5s | ~$0.0003/sec | No |
 | **Piper** | Good | <0.5s | Free | No |
@@ -197,6 +197,7 @@ kiwi-voice/
 │   ├── task_announcer.py    # Long-running task status announcer
 │   └── tts/                 # TTS providers
 │       ├── elevenlabs.py
+│       ├── elevenlabs_ws.py  # WebSocket input streaming
 │       ├── piper.py
 │       ├── qwen_local.py
 │       ├── runpod.py
