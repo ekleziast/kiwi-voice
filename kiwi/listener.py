@@ -540,12 +540,17 @@ class KiwiListener:
         
         # === BARGE-IN: РЎРѕСЃС‚РѕСЏРЅРёРµ РґР»СЏ СѓРјРЅРѕРіРѕ РѕРїСЂРµРґРµР»РµРЅРёСЏ РїСЂРµСЂС‹РІР°РЅРёСЏ ===
         self._barge_in_counter = 0          # РЎС‡С‘С‚С‡РёРє РїРѕРґСЂСЏРґ РёРґСѓС‰РёС… С‡Р°РЅРєРѕРІ СЃ СЂРµС‡СЊСЋ
-        self._barge_in_chunks_required = 5  # РќСѓР¶РЅРѕ 5 С‡Р°РЅРєРѕРІ РїРѕРґСЂСЏРґ (~1.5s) РґР»СЏ barge-in
-        self._barge_in_volume_multiplier = 5.0  # РџРѕСЂРѕРі РіСЂРѕРјРєРѕСЃС‚Рё Г—5.0 РІРѕ РІСЂРµРјСЏ TTS
-        self._barge_in_min_volume = 0.045   # РђР±СЃРѕР»СЋС‚РЅС‹Р№ РјРёРЅРёРјСѓРј РіСЂРѕРјРєРѕСЃС‚Рё РґР»СЏ barge-in
-        self._barge_in_grace_period = 0.35  # 350ms РїРѕСЃР»Рµ РЅР°С‡Р°Р»Р° TTS вЂ” РёРіРЅРѕСЂРёСЂСѓРµРј barge-in
+        self._barge_in_chunks_required = 3  # 3 чанка из окна 5 (~0.9s) для barge-in
+        self._barge_in_volume_multiplier = 2.5  # Порог громкости ×2.5 во время TTS
+        self._barge_in_min_volume = 0.025   # Абсолютный минимум громкости для barge-in
+        self._barge_in_grace_period = 0.35  # 350ms после начала TTS — игнорируем barge-in
+        self._barge_in_window_size = 5      # Размер скользящего окна
+        self._barge_in_window: list = []    # Скользящее окно результатов (True/False)
         self._tts_start_time = 0.0          # РњРµС‚РєР° РЅР°С‡Р°Р»Р° TTS (СѓСЃС‚Р°РЅР°РІР»РёРІР°РµС‚СЃСЏ РёР· service)
-        self._post_tts_dead_zone = 2.5      # 2.5СЃ РїРѕСЃР»Рµ Р·Р°РІРµСЂС€РµРЅРёСЏ TTS вЂ” РЅРµ Р·Р°РїРёСЃС‹РІР°РµРј (СЌС…Рѕ Р·Р°С‚РёС…Р°РµС‚)
+        self._post_tts_dead_zone = 2.5      # 2.5СЃ РїРѕСЃР»Рµ Р·Р°РІРµСЂС€РµРЅРёСЏ TTS вЂ" РЅРµ Р·Р°РїРёСЃС‹РІР°РµРј (СЌС…Рѕ Р·Р°С‚РёС…Р°РµС‚)
+        self._last_tts_text = ""            # Последний текст, произнесённый Kiwi (для антиэхо)
+        self._last_tts_time = 0.0           # Время окончания последнего TTS
+        self._tts_echo_window = 15.0        # Окно антиэхо-проверки (сек после TTS)
         
         # === Р”Р•Р‘РђРЈРќРЎРРќР“ Рё РљРћРќРўР РћР›Р¬ РћР§Р•Р Р•Р”Р ===
         self._last_submit_time = 0.0        # Р’СЂРµРјСЏ РїРѕСЃР»РµРґРЅРµРіРѕ submit
@@ -629,6 +634,10 @@ class KiwiListener:
                     if 'barge_in_grace_period' in realtime_config:
                         self._barge_in_grace_period = max(0.0, float(realtime_config['barge_in_grace_period']))
                         kiwi_log("CONFIG", f"Loaded barge_in_grace_period={self._barge_in_grace_period}s")
+
+                    if 'barge_in_window_size' in realtime_config:
+                        self._barge_in_window_size = max(self._barge_in_chunks_required, int(realtime_config['barge_in_window_size']))
+                        kiwi_log("CONFIG", f"Loaded barge_in_window_size={self._barge_in_window_size}")
                     
                     # === РђР”РђРџРўРР’РќРђРЇ РџРђРЈР—Рђ ===
                     if 'silence_duration_long_speech' in realtime_config:
@@ -964,9 +973,48 @@ class KiwiListener:
             if re.search(pattern, text_lower, re.IGNORECASE):
                 kiwi_log("PHANTOM", f"Filtered: '{text}' (matches pattern '{pattern}')")
                 return True
-        
+
         return False
-    
+
+    def _is_tts_echo(self, text: str) -> bool:
+        """Проверяет, является ли текст эхом от TTS Kiwi."""
+        if not self._last_tts_text:
+            return False
+
+        # Проверяем только в окне после TTS
+        if time.time() - self._last_tts_time > self._tts_echo_window:
+            return False
+
+        text_lower = text.lower().strip()
+        tts_lower = self._last_tts_text.lower()
+
+        if len(text_lower) < 3:
+            return False
+
+        # Разбиваем на слова (без пунктуации)
+        import re as _re
+        text_words = set(_re.findall(r'[а-яёa-z0-9]+', text_lower))
+        tts_words = set(_re.findall(r'[а-яёa-z0-9]+', tts_lower))
+
+        if not text_words:
+            return False
+
+        # Убираем стоп-слова (предлоги, союзы)
+        stop_words = {'и', 'в', 'на', 'с', 'а', 'но', 'не', 'что', 'он', 'она', 'я', 'ты', 'мы', 'к', 'по', 'из', 'за', 'у', 'о', 'от', 'до', 'же', 'ли', 'бы', 'ну', 'да', 'нет', 'как', 'так', 'всё', 'все', 'это', 'то', 'ещё', 'уже', 'было', 'был', 'была', 'были'}
+        text_meaningful = text_words - stop_words
+
+        if not text_meaningful:
+            return False
+
+        overlap = text_meaningful & tts_words
+        ratio = len(overlap) / len(text_meaningful)
+
+        if ratio >= 0.5:
+            kiwi_log("TTS-ECHO", f"Filtered echo: '{text}' (overlap={ratio:.0%}, words={overlap})")
+            return True
+
+        return False
+
     def load_model(self):
         """Р—Р°РіСЂСѓР¶Р°РµС‚ РјРѕРґРµР»СЊ Whisper."""
         log_func = kiwi_log if UTILS_AVAILABLE else lambda tag, msg: print(f"[{tag}] {msg}", flush=True)
@@ -1335,6 +1383,13 @@ class KiwiListener:
                 if volume > effective_min_speech_volume and self._check_vad(audio_chunk):
                     is_sound = True
 
+            # === VAD DOWNGRADE: during speech, distinguish speech from background noise ===
+            # Volume above threshold but VAD says no speech → treat as silence.
+            # Allows end-of-speech detection even with persistent background noise.
+            if is_sound and is_speaking and self._vad_enabled:
+                if not self._check_vad(audio_chunk):
+                    is_sound = False
+
             # =================================================================
             # Р“Р›РђР’РќРђРЇ Р—РђР©РРўРђ: РљРѕРіРґР° Kiwi РіРѕРІРѕСЂРёС‚ вЂ” РќР• Р·Р°РїРёСЃС‹РІР°РµРј Р°СѓРґРёРѕ РґР»СЏ Whisper
             # РћР±СЂР°Р±Р°С‚С‹РІР°РµРј РўРћР›Р¬РљРћ barge-in Р»РѕРіРёРєСѓ. РРЅР°С‡Рµ Kiwi СѓСЃР»С‹С€РёС‚ СЃРІРѕР№ РіРѕР»РѕСЃ
@@ -1342,28 +1397,27 @@ class KiwiListener:
             # =================================================================
             if is_kiwi_speaking:
                 if is_sound:
-                    # РўРѕР»СЊРєРѕ barge-in Р»РѕРіРёРєР°, Р±РµР· Р·Р°РїРёСЃРё РІ audio_buffer
                     time_since_tts = time.time() - self._tts_start_time
                     if time_since_tts >= self._barge_in_grace_period:
-                        # РџРѕРІС‹С€РµРЅРЅС‹Р№ РїРѕСЂРѕРі + Р°Р±СЃРѕР»СЋС‚РЅС‹Р№ РјРёРЅРёРјСѓРј
                         barge_in_threshold = max(
                             self._silence_threshold * self._barge_in_volume_multiplier,
                             self._barge_in_min_volume
                         )
-                        if volume > barge_in_threshold:
-                            is_real_speech = self._check_vad(audio_chunk)
-                            if is_real_speech:
-                                self._barge_in_counter += 1
-                                if self._barge_in_counter >= self._barge_in_chunks_required:
-                                    kiwi_log("BARGE-IN", f"Confirmed! vol={volume:.4f}, threshold={barge_in_threshold:.4f}, consecutive={self._barge_in_counter}")
-                                    self._request_barge_in()
-                                    self._barge_in_counter = 0
-                            else:
-                                self._barge_in_counter = 0
-                        else:
-                            self._barge_in_counter = 0
+                        # Sliding window: запоминаем результат каждого чанка
+                        chunk_passed = volume > barge_in_threshold and self._check_vad(audio_chunk)
+                        self._barge_in_window.append(chunk_passed)
+                        if len(self._barge_in_window) > self._barge_in_window_size:
+                            self._barge_in_window = self._barge_in_window[-self._barge_in_window_size:]
+
+                        hits = sum(self._barge_in_window)
+                        if hits >= self._barge_in_chunks_required:
+                            kiwi_log("BARGE-IN", f"Confirmed! vol={volume:.4f}, threshold={barge_in_threshold:.4f}, hits={hits}/{len(self._barge_in_window)}")
+                            self._request_barge_in()
+                            self._barge_in_window.clear()
+                    else:
+                        self._barge_in_window.clear()
                 else:
-                    self._barge_in_counter = 0
+                    self._barge_in_window.clear()
                 
                 # РЎР±СЂР°СЃС‹РІР°РµРј speech state вЂ” Р·Р°РїРёСЃСЊ Р°СѓРґРёРѕ РґР»СЏ Whisper РЅРµ РІРµРґС‘С‚СЃСЏ
                 if is_speaking:
@@ -1921,7 +1975,10 @@ class KiwiListener:
             # РџСЂРѕРІРµСЂРєР° РЅР° С„Р°РЅС‚РѕРјРЅС‹Р№ С‚РµРєСЃС‚
             if self._is_phantom_text(text):
                 continue
-            
+
+            if self._is_tts_echo(text):
+                continue
+
             kiwi_log("TEXT", f"Heard: {text}")
 
             # РћР±РЅРѕРІР»СЏРµРј СЃРЅРёРјРѕРє РїРѕСЃР»РµРґРЅРµРіРѕ РіРѕРІРѕСЂСЏС‰РµРіРѕ РґР»СЏ СЃРµСЂРІРёСЃР° (approval/policy)
@@ -2100,7 +2157,7 @@ class KiwiListener:
             if full_text:
                 text_lower = full_text.strip().lower()
                 for pattern in WHISPER_HALLUCINATION_PATTERNS:
-                    if text_lower.startswith(pattern):
+                    if pattern in text_lower:
                         kiwi_log("WHISPER", f"Hallucination filtered: '{full_text}' (matched: '{pattern}')", level="WARNING")
                         return None
             

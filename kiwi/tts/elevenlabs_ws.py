@@ -156,6 +156,7 @@ class ElevenLabsWSStreamManager:
 
         self._stop_event.clear()
         self._buffer = ""
+        self._unflushed_chars = 0
         self._eos_sent = False
         self._is_final_received = False
         self._audio_queue = _queue.Queue()
@@ -300,7 +301,16 @@ class ElevenLabsWSStreamManager:
         self._buffer = buf[last_space + 1:]
 
         # Check if we should flush (sentence boundary)
-        flush = bool(re.search(r'[.!?;:]\s*$', to_send))
+        is_sentence_end = bool(re.search(r'[.!?;:]\s*$', to_send))
+        self._unflushed_chars = getattr(self, '_unflushed_chars', 0) + len(to_send)
+
+        # Don't flush short fragments — let ElevenLabs combine them with
+        # the next text for seamless speech.  Short sentences like "Работаю!"
+        # flushed alone cause audible gaps before the next sentence.
+        _MIN_FLUSH_CHARS = 40
+        flush = is_sentence_end and self._unflushed_chars >= _MIN_FLUSH_CHARS
+        if flush:
+            self._unflushed_chars = 0
 
         self._send_text(to_send, flush=flush)
 

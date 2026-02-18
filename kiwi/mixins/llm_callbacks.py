@@ -96,6 +96,8 @@ class LLMCallbacksMixin:
         # Post-playback transition (mirrors _play_audio_interruptible)
         self._is_speaking = False
         self.listener._tts_start_time = time.time()
+        self.listener._last_tts_text = full_text or ""
+        self.listener._last_tts_time = time.time()
         self.listener.activate_dialog_mode()
 
         if self.listener.dialog_mode:

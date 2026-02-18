@@ -466,6 +466,8 @@ class TTSSpeechMixin:
                         kiwi_log("SPEAKER", f"Failed to create self-profile: {e}", level="ERROR")
 
                 self._play_audio_interruptible(audio, sample_rate, allow_barge_in=allow_barge_in)
+                self.listener._last_tts_text = text or ""
+                self.listener._last_tts_time = time.time()
 
             except Exception as e:
                 kiwi_log("ERR", f"Speak error: {e}", level="ERROR")
@@ -528,6 +530,8 @@ class TTSSpeechMixin:
         self._is_speaking = False
 
         self.listener._tts_start_time = time.time()
+        self.listener._last_tts_text = text or ""
+        self.listener._last_tts_time = time.time()
         self.listener.activate_dialog_mode()
 
         if self.listener.dialog_mode:
