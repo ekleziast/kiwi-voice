@@ -402,11 +402,21 @@ class ElevenLabsWSStreamManager:
     # ------------------------------------------------------------------
 
     def _playback_worker(self):
-        """Accumulate audio into buffer, play in ~1s batches for smooth output."""
+        """Accumulate audio into buffer, play in batches for smooth output.
+
+        Two thresholds:
+        - min_samples  (~1s): target batch size for normal playback
+        - min_play     (~0.3s): absolute floor — never send anything shorter
+          to sd.play() to avoid audible micro-fragments.  Only the very last
+          piece of the stream is exempt from the floor.
+        """
+        import queue as _queue
+
         chunks_played = 0
         pending: list = []       # list of np arrays
         pending_samples = 0      # total samples in pending
         min_samples = int(self._playback_buffer_s * _WS_SAMPLE_RATE)
+        min_play = int(0.3 * _WS_SAMPLE_RATE)  # 300ms hard floor
         stream_ended = False
 
         try:
@@ -416,40 +426,62 @@ class ElevenLabsWSStreamManager:
                              "Playback stopped by event", level="INFO")
                     break
 
-                # Try to drain the queue into the pending buffer
-                try:
-                    item = self._audio_queue.get(timeout=0.1)
-                except Exception:
-                    # queue.Empty — if we have pending audio and stream ended, flush
-                    if stream_ended and pending:
-                        pass  # fall through to play
-                    else:
-                        continue
+                # --- drain queue aggressively --------------------------------
+                # Block up to 0.1s for the first item only when the pending
+                # buffer is empty; after that do non-blocking bulk drain so we
+                # never sit idle with audio waiting in the queue.
+                wait = 0.1 if not pending else 0.0
+                drained = 0
+                while True:
+                    try:
+                        item = self._audio_queue.get(timeout=wait)
+                    except _queue.Empty:
+                        break
 
-                if item is None:
-                    stream_ended = True
-                else:
+                    if item is None:
+                        stream_ended = True
+                        break
+
                     audio, _sr = item
                     if audio is not None and len(audio) > 0:
                         pending.append(audio)
                         pending_samples += len(audio)
+                        drained += 1
 
-                # Decide whether to play
-                should_play = (
-                    (pending_samples >= min_samples)
-                    or (stream_ended and pending)
-                )
+                    # After first successful get, switch to non-blocking
+                    wait = 0.0
 
-                if not should_play:
+                    # Stop draining once we have enough for a batch
+                    if pending_samples >= min_samples:
+                        break
+
+                # --- decide whether to play -----------------------------------
+                if not pending:
+                    if stream_ended:
+                        break
+                    continue
+
+                enough = pending_samples >= min_samples
+                is_final_flush = stream_ended
+
+                if not enough and not is_final_flush:
+                    # Not enough audio yet and stream still going — wait more
                     continue
 
                 if self._stop_event.is_set():
                     break
 
-                # Concatenate and play
+                # Concatenate accumulated fragments into one array
                 combined = np.concatenate(pending) if len(pending) > 1 else pending[0]
                 pending.clear()
                 pending_samples = 0
+
+                # Guard against micro-fragments (< 300ms) mid-stream.
+                # Keep them in the buffer to merge with the next batch.
+                if len(combined) < min_play and not is_final_flush:
+                    pending.append(combined)
+                    pending_samples = len(combined)
+                    continue
 
                 try:
                     dur = len(combined) / _WS_SAMPLE_RATE
@@ -462,7 +494,7 @@ class ElevenLabsWSStreamManager:
                     kiwi_log("ELEVENLABS-WS",
                              f"Playback error: {exc}", level="ERROR")
 
-                if stream_ended:
+                if is_final_flush:
                     break
 
         except Exception as exc:
