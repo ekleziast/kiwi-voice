@@ -878,13 +878,16 @@ class KiwiServiceOpenClaw:
                 # Чисто таймерный подход — sd.wait() может зависнуть навечно
                 # на Windows при проблемах с аудио-устройством (GIL-блокировка).
                 while (time.monotonic() - started) < max_duration:
-                    if self._barge_in_requested:
+                    if not self.is_running or self._barge_in_requested:
                         interrupted = True
                         try:
                             sd.stop()
                         except Exception:
                             pass
-                        kiwi_log("TTS-CHUNK", "Playback interrupted by barge-in", level="INFO")
+                        if not self.is_running:
+                            kiwi_log("TTS-CHUNK", "Playback interrupted by shutdown", level="INFO")
+                        else:
+                            kiwi_log("TTS-CHUNK", "Playback interrupted by barge-in", level="INFO")
                         break
                     time.sleep(poll_interval)
                 else:
@@ -1161,8 +1164,36 @@ class KiwiServiceOpenClaw:
                 source='kiwi_service'
             )
             get_event_bus().stop()
-        
+
         self.is_running = False
+
+        # Немедленно останавливаем аудио воспроизведение
+        self._barge_in_requested = True
+        self._streaming_stop_event.set()
+        try:
+            sd.stop()
+        except Exception:
+            pass
+
+        # Останавливаем streaming TTS (без ожидания)
+        if self._streaming_tts_manager:
+            try:
+                self._streaming_tts_manager.stop(graceful=False)
+            except Exception:
+                pass
+            self._streaming_tts_manager = None
+
+        # Останавливаем task announcer
+        if self._task_status_announcer:
+            try:
+                self._task_status_announcer.stop()
+            except Exception:
+                pass
+            self._task_status_announcer = None
+
+        # Отменяем idle timer
+        self._cancel_idle_timer()
+
         self.listener.stop()
         kiwi_log("KIWI", "Kiwi Voice Service stopped", level="INFO")
 
@@ -1836,7 +1867,7 @@ class KiwiServiceOpenClaw:
             max_duration = len(audio) / sample_rate + 0.5  # +0.5s buffer
 
             while time.time() - start_time < max_duration:
-                if self._barge_in_requested:
+                if not self.is_running or self._barge_in_requested:
                     if output_stream is not None:
                         output_stream.stop()
                     break
@@ -1991,6 +2022,9 @@ class KiwiServiceOpenClaw:
                     sd.wait()
                 else:
                     while output_stream.active:
+                        if not self.is_running:
+                            output_stream.stop()
+                            break
                         if allow_barge_in and self._barge_in_requested:
                             interrupted_by_barge_in = True
                             kiwi_log("BARGE-IN", "Stopping TTS playback", level="INFO")
