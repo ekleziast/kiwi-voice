@@ -216,10 +216,27 @@ class ElevenLabsWSStreamManager:
         self._playback_thread.start()
         kiwi_log("ELEVENLABS-WS", "Manager started", level="INFO")
 
+    def _reconnect(self):
+        """Re-establish WS connection after server-side close between waves."""
+        kiwi_log("ELEVENLABS-WS",
+                 "WS died between waves, reconnecting...", level="WARNING")
+        # Wait for old threads to finish (should be dead already)
+        if self._recv_thread and self._recv_thread.is_alive():
+            self._recv_thread.join(timeout=2.0)
+        if self._playback_thread and self._playback_thread.is_alive():
+            self._playback_thread.join(timeout=2.0)
+        self._close_ws()
+        self.connection_lost = False
+        self.start()
+
     def on_token(self, token: str):
         """Accept an LLM token and forward to ElevenLabs WS."""
-        if not self._is_active or not self._ws_connected:
+        if not self._is_active:
             return
+        if not self._ws_connected:
+            self._reconnect()
+            if not self._ws_connected:
+                return
 
         cleaned = self._clean_token(token)
         if not cleaned:
@@ -436,6 +453,10 @@ class ElevenLabsWSStreamManager:
                     break
 
                 if not raw:
+                    kiwi_log("ELEVENLABS-WS",
+                             "Server closed WS connection", level="WARNING")
+                    self.connection_lost = True
+                    self._ws_connected = False
                     break
 
                 try:
