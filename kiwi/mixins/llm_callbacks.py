@@ -19,6 +19,15 @@ class LLMCallbacksMixin:
                 self._stream_watchdog_total_chars += len(token)
                 self._stream_watchdog_last_token_ts = time.time()
 
+            # Extend THINKING state timeout while tokens are arriving.
+            try:
+                with self._state_lock:
+                    if self._dialogue_state == DialogueState.THINKING:
+                        timeout = self._state_timeouts.get(DialogueState.THINKING, 60.0)
+                        self._state_until = time.time() + timeout
+            except Exception:
+                pass
+
             # Stop the status announcer on first real text — response is streaming,
             # no need for "Думаю над ответом..." status messages anymore.
             # Use stop_nowait() to avoid blocking LLM token delivery for 2s
@@ -38,10 +47,26 @@ class LLMCallbacksMixin:
         with self._stream_watchdog_lock:
             self._stream_watchdog_last_activity_ts = time.time()
 
-        if not self._task_status_announcer:
-            return
+        # Extend THINKING state timeout — agent IS working (tool calls, etc.).
+        # Without this, the 60s hard timeout kills long-running tasks like
+        # model downloads or code generation.
+        try:
+            with self._state_lock:
+                if self._dialogue_state == DialogueState.THINKING:
+                    timeout = self._state_timeouts.get(DialogueState.THINKING, 60.0)
+                    self._state_until = time.time() + timeout
+        except Exception:
+            pass
+
         message = activity.get("message", "")
-        if not message:
+
+        # Restart announcer if it was killed by first token but agent is still
+        # doing tool work within the same wave (no lifecycle:end yet).
+        if not self._task_status_announcer and self._streaming_tts_manager and message:
+            kiwi_log("LLM", "Agent doing tool work — restarting status announcer", level="INFO")
+            self._create_status_announcer(message, intervals=[5, 15, 30, 60, 120])
+
+        if not self._task_status_announcer or not message:
             return
         self._task_status_announcer.on_activity(message)
 
