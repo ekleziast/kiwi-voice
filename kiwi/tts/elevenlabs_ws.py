@@ -43,6 +43,7 @@ class ElevenLabsWSStreamManager:
         is_interrupted: Optional[Callable[[], bool]] = None,
         on_connection_lost: Optional[Callable] = None,
         on_playback_idle: Optional[Callable] = None,
+        on_audio_activity: Optional[Callable] = None,
     ):
         self._api_key = api_key
         self._voice_id = voice_id
@@ -58,12 +59,14 @@ class ElevenLabsWSStreamManager:
         self._is_interrupted = is_interrupted
         self._on_connection_lost = on_connection_lost
         self._on_playback_idle = on_playback_idle
+        self._on_audio_activity = on_audio_activity
 
         self._ws = None
         self._buffer = ""
         self._lock = threading.Lock()
         self._is_active = False
         self._stop_event = threading.Event()
+        self._session_gen = 0  # incremented on each start(); old threads exit on mismatch
         self._recv_thread: Optional[threading.Thread] = None
         self._playback_thread: Optional[threading.Thread] = None
         self._audio_queue: Optional[Any] = None
@@ -158,6 +161,8 @@ class ElevenLabsWSStreamManager:
         import websocket as _websocket
 
         self._stop_event.clear()
+        self._session_gen += 1
+        my_gen = self._session_gen
         self._cancel_token_idle_timer()
         self._buffer = ""
         self._unflushed_chars = 0
@@ -172,7 +177,7 @@ class ElevenLabsWSStreamManager:
             f"&output_format={_WS_OUTPUT_FORMAT}"
         )
 
-        kiwi_log("ELEVENLABS-WS", f"Connecting to {url[:80]}...", level="INFO")
+        kiwi_log("ELEVENLABS-WS", f"Connecting to {url[:80]}... (gen={my_gen})", level="INFO")
         try:
             self._ws = _websocket.WebSocket()
             self._ws.settimeout(self._inactivity_timeout)
@@ -207,27 +212,43 @@ class ElevenLabsWSStreamManager:
         self._is_active = True
 
         self._recv_thread = threading.Thread(
-            target=self._recv_worker, daemon=True, name="kiwi-11labs-ws-recv"
+            target=self._recv_worker, args=(my_gen,),
+            daemon=True, name="kiwi-11labs-ws-recv"
         )
         self._playback_thread = threading.Thread(
-            target=self._playback_worker, daemon=True, name="kiwi-11labs-ws-play"
+            target=self._playback_worker, args=(my_gen,),
+            daemon=True, name="kiwi-11labs-ws-play"
         )
         self._recv_thread.start()
         self._playback_thread.start()
-        kiwi_log("ELEVENLABS-WS", "Manager started", level="INFO")
+        kiwi_log("ELEVENLABS-WS", f"Manager started (gen={my_gen})", level="INFO")
 
     def _reconnect(self):
         """Re-establish WS connection after server-side close between waves."""
         kiwi_log("ELEVENLABS-WS",
-                 "WS died between waves, reconnecting...", level="WARNING")
-        # Wait for old threads to finish (should be dead already)
-        if self._recv_thread and self._recv_thread.is_alive():
-            self._recv_thread.join(timeout=2.0)
-        if self._playback_thread and self._playback_thread.is_alive():
-            self._playback_thread.join(timeout=2.0)
+                 f"WS died between waves, reconnecting... (gen={self._session_gen})",
+                 level="WARNING")
+        # Signal old threads to stop and drain the queue so playback exits.
+        self._stop_event.set()
         self._close_ws()
+        if self._audio_queue:
+            try:
+                while not self._audio_queue.empty():
+                    self._audio_queue.get_nowait()
+            except Exception:
+                pass
+            self._audio_queue.put(None)
+        if self._recv_thread and self._recv_thread.is_alive():
+            self._recv_thread.join(timeout=3.0)
+        if self._playback_thread and self._playback_thread.is_alive():
+            self._playback_thread.join(timeout=3.0)
+            if self._playback_thread.is_alive():
+                kiwi_log("ELEVENLABS-WS",
+                         "Old playback thread still alive after join; "
+                         "session_gen will force exit",
+                         level="WARNING")
         self.connection_lost = False
-        self.start()
+        self.start()  # clears _stop_event, increments _session_gen
 
     def on_token(self, token: str):
         """Accept an LLM token and forward to ElevenLabs WS."""
@@ -429,11 +450,11 @@ class ElevenLabsWSStreamManager:
     # Recv thread
     # ------------------------------------------------------------------
 
-    def _recv_worker(self):
+    def _recv_worker(self, my_gen: int):
         """Receive audio chunks from ElevenLabs WS."""
         chunks_received = 0
         try:
-            while not self._stop_event.is_set():
+            while not self._stop_event.is_set() and self._session_gen == my_gen:
                 if not self._ws or not self._ws_connected:
                     break
                 try:
@@ -505,13 +526,17 @@ class ElevenLabsWSStreamManager:
     # Playback thread
     # ------------------------------------------------------------------
 
-    def _playback_worker(self):
+    def _playback_worker(self, my_gen: int):
         """Gapless playback via a single continuous sd.OutputStream.
 
         Opens one OutputStream on the first audio and feeds it with
         stream.write() — no gaps between batches because the underlying
         PortAudio stream never stops.  Audio is written in 100 ms
         sub-chunks so barge-in is checked every ~100 ms.
+
+        my_gen: session generation captured at start(). If self._session_gen
+        diverges (reconnect happened), this worker exits immediately to
+        prevent parallel audio streams on the same output device.
         """
         import queue as _queue
         import sounddevice as sd
@@ -526,10 +551,20 @@ class ElevenLabsWSStreamManager:
         interrupted = False
         idle_since = None        # track when playback went idle (no audio)
         idle_notified = False    # whether on_playback_idle was already fired
+        last_activity_report = 0.0  # monotonic ts of last on_audio_activity call
+
+        def _superseded():
+            return self._session_gen != my_gen
 
         try:
             while True:
-                # --- check stop / barge-in ---
+                # --- check stop / barge-in / superseded ---
+                if _superseded():
+                    kiwi_log("ELEVENLABS-WS",
+                             f"Playback worker gen={my_gen} superseded by {self._session_gen}",
+                             level="INFO")
+                    interrupted = True
+                    break
                 if self._stop_event.is_set():
                     interrupted = True
                     break
@@ -578,7 +613,7 @@ class ElevenLabsWSStreamManager:
                 if pending_samples < min_samples and not stream_ended:
                     continue
 
-                if self._stop_event.is_set():
+                if _superseded() or self._stop_event.is_set():
                     interrupted = True
                     break
 
@@ -620,7 +655,7 @@ class ElevenLabsWSStreamManager:
                 # Write in 100 ms sub-chunks for responsive barge-in
                 sub_size = int(0.1 * _WS_SAMPLE_RATE)  # 2400 samples
                 for i in range(0, len(combined), sub_size):
-                    if self._stop_event.is_set():
+                    if _superseded() or self._stop_event.is_set():
                         interrupted = True
                         break
                     if self._is_interrupted and self._is_interrupted():
@@ -633,6 +668,16 @@ class ElevenLabsWSStreamManager:
                 kiwi_log("ELEVENLABS-WS",
                          f"Wrote {dur:.2f}s to stream", level="DEBUG")
                 batches_played += 1
+
+                # Report audio activity to watchdog (throttled to ~every 2s)
+                now_mono = time.monotonic()
+                if now_mono - last_activity_report >= 2.0:
+                    last_activity_report = now_mono
+                    if self._on_audio_activity:
+                        try:
+                            self._on_audio_activity()
+                        except Exception:
+                            pass
 
                 if interrupted or stream_ended:
                     break
@@ -651,11 +696,13 @@ class ElevenLabsWSStreamManager:
                 except Exception:
                     pass
                 kiwi_log("ELEVENLABS-WS", "OutputStream closed", level="INFO")
-            if notified_start and self._on_playback_done:
+            # Only fire on_playback_done for the CURRENT session — stale
+            # workers from a superseded generation must not reset service state.
+            if notified_start and self._on_playback_done and not _superseded():
                 try:
                     self._on_playback_done()
                 except Exception:
                     pass
             kiwi_log("ELEVENLABS-WS",
-                     f"Playback worker exited ({batches_played} batches)",
+                     f"Playback worker exited (gen={my_gen}, {batches_played} batches)",
                      level="INFO")

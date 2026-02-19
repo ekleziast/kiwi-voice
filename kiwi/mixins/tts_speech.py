@@ -210,6 +210,11 @@ class TTSSpeechMixin:
                 except Exception:
                     pass
 
+            def _ws_on_audio_activity():
+                """ElevenLabs WS is actively playing audio — keep watchdog alive."""
+                with self._stream_watchdog_lock:
+                    self._stream_watchdog_last_activity_ts = time.time()
+
             self._streaming_tts_manager = ElevenLabsWSStreamManager(
                 api_key=self.config.tts_elevenlabs_api_key,
                 voice_id=self.config.tts_elevenlabs_voice_id,
@@ -223,6 +228,7 @@ class TTSSpeechMixin:
                 is_interrupted=_ws_is_interrupted,
                 on_connection_lost=_ws_on_connection_lost,
                 on_playback_idle=_ws_on_playback_idle,
+                on_audio_activity=_ws_on_audio_activity,
             )
             kiwi_log("KIWI", "Using ElevenLabs WS streaming", level="INFO")
         else:
