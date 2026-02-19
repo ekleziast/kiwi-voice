@@ -60,6 +60,12 @@ class LLMCallbacksMixin:
 
         message = activity.get("message", "")
 
+        # Flush ElevenLabs WS buffer — agent switched from text to tool work,
+        # the last word of the text segment is stuck in the buffer without a
+        # trailing space.  flush_wave() is idempotent (no-op if buffer empty).
+        if self._streaming_tts_manager and hasattr(self._streaming_tts_manager, 'flush_wave'):
+            self._streaming_tts_manager.flush_wave()
+
         # Restart announcer if it was killed by first token but agent is still
         # doing tool work within the same wave (no lifecycle:end yet).
         if not self._task_status_announcer and self._streaming_tts_manager and message:

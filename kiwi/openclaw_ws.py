@@ -108,6 +108,7 @@ class OpenClawWebSocket:
         # Current chat run tracking
         self._current_run_id: Optional[str] = None
         self._seen_final_run_ids: set[str] = set()
+        self._cancel_initiated = False  # suppress on_complete for local cancels
 
         # Deferred final: debounce lifecycle:end to support multi-wave agent responses.
         # Agent may complete multiple runs (tool calls, research steps) within a single
@@ -1204,8 +1205,13 @@ class OpenClawWebSocket:
             self._is_streaming = False
             self._is_processing = False
 
-            # Notify streaming completion
-            if self._callback_mode == "streaming" and self.on_complete:
+            # Don't fire on_complete for locally-initiated cancels —
+            # the caller (e.g. _dispatch_streaming) already set up a new
+            # request and TTS manager; firing on_complete would kill them.
+            if self._cancel_initiated:
+                self._cancel_initiated = False
+                self._log_ws("Suppressing on_complete for local cancel", "DEBUG")
+            elif self._callback_mode == "streaming" and self.on_complete:
                 self.on_complete(self._full_response)
 
             self._response_event.set()
@@ -1400,6 +1406,7 @@ class OpenClawWebSocket:
 
         # Сбрасываем состояние стриминга перед новым запросом
         self._cancel_deferred_final()  # new request overrides any pending final
+        self._cancel_initiated = False  # new request clears stale cancel flag
         acquired = self._buffer_lock.acquire(timeout=3.0)
         if acquired:
             try:
@@ -1474,6 +1481,7 @@ class OpenClawWebSocket:
     def cancel(self) -> bool:
         """Прерывает текущую обработку через chat.abort (протокол v3)."""
         self._cancel_deferred_final()  # cancel overrides pending final
+        self._cancel_initiated = True  # suppress on_complete from abort response
         self._log_ws("Cancel requested (chat.abort)", "WARN")
 
         if self._is_authenticated and (self._is_processing or self._is_streaming):
