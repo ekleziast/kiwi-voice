@@ -105,6 +105,14 @@ class OpenClawWebSocket:
         self._current_run_id: Optional[str] = None
         self._seen_final_run_ids: set[str] = set()
 
+        # Deferred final: debounce lifecycle:end to support multi-wave agent responses.
+        # Agent may complete multiple runs (tool calls, research steps) within a single
+        # user request — each run sends lifecycle:end but only the LAST one is truly final.
+        self._deferred_final_timer: Optional[threading.Timer] = None
+        self._deferred_final_info: Optional[dict] = None
+        self._deferred_final_lock = threading.Lock()
+        self._lifecycle_final_debounce_s = 2.5
+
         # Задержка перед отправкой накопленного текста в TTS (debounce)
         self._tts_debounce_ms = 150
         self._last_send_time = 0.0
@@ -819,9 +827,14 @@ class OpenClawWebSocket:
         # и между текстовыми assistant-delta может проходить заметное время.
         # Отмечаем такую активность, чтобы watchdog не делал ложный stall/retry.
         if stream in ("thinking", "reasoning", "compaction"):
+            self._cancel_deferred_final()  # agent is still working
             self._touch_stream_progress(stream)
 
         if stream == "assistant":
+            # Agent is producing text — cancel any pending deferred final
+            # from a previous lifecycle:end (multi-wave response continues).
+            self._cancel_deferred_final()
+
             # В OpenClaw canonical поле для chat-bridge — data.text (см. server-chat.ts).
             # data.delta используем только как fallback.
             assistant_content = data.get("text", data.get("content", ""))
@@ -844,22 +857,21 @@ class OpenClawWebSocket:
             self._touch_stream_progress(f"lifecycle:{phase}")
             # Suppress immediate start announcement for short requests.
             if phase in ("thinking", "plan", "planning"):
+                # Agent starting a new thinking step — cancel pending final
+                self._cancel_deferred_final()
                 self._emit_activity("lifecycle", "Планирую шаги решения.", {"phase": phase})
 
             if phase in ("end", "done", "complete", "completed", "finish", "finished"):
-                synthetic = {
-                    "runId": run_id,
-                    "sessionKey": session_key,
-                    "seq": seq,
-                    "state": "final",
-                }
+                # Don't fire final immediately — the agent may continue with
+                # more runs (tool calls, research steps).  Use deferred final
+                # with debounce so that multi-wave responses are kept intact.
                 final_content = data.get("text", data.get("content", ""))
-                if final_content:
-                    synthetic["message"] = {"content": final_content}
-                self._handle_chat_event(synthetic)
+                self._current_run_id = None  # allow next wave's events through
+                self._schedule_deferred_final(run_id, session_key, seq, final_content)
                 return
 
             if phase in ("error", "failed", "fail"):
+                self._cancel_deferred_final()  # error overrides any pending final
                 self._emit_activity("lifecycle", "Возникла ошибка, проверяю что случилось.", {"phase": phase})
                 err = data.get("error") or data.get("message") or data.get("reason") or "Unknown lifecycle error"
                 self._handle_chat_event({
@@ -872,6 +884,7 @@ class OpenClawWebSocket:
                 return
 
             if phase in ("aborted", "cancelled", "canceled", "stop", "stopped"):
+                self._cancel_deferred_final()  # abort overrides any pending final
                 self._handle_chat_event({
                     "runId": run_id,
                     "sessionKey": session_key,
@@ -895,6 +908,10 @@ class OpenClawWebSocket:
             return
 
         if stream == "tool":
+            # Agent is calling a tool — cancel any pending deferred final
+            # (multi-wave response continues with tool invocation).
+            self._cancel_deferred_final()
+
             # Обновляем watchdog — tool вызовы означают, что LLM работает,
             # даже если текстовых токенов ещё нет.
             self._touch_stream_progress(stream)
@@ -906,6 +923,83 @@ class OpenClawWebSocket:
         # tool/compaction/reasoning и прочие служебные потоки в голосовой ответ не конвертируем.
         if stream not in ("compaction",):
             self._log_ws(f"Agent stream ignored: {stream}", "DEBUG")
+
+    # ------------------------------------------------------------------
+    # Deferred final: debounce lifecycle:end for multi-wave agent responses
+    # ------------------------------------------------------------------
+
+    def _schedule_deferred_final(self, run_id, session_key, seq, content):
+        """Schedule a final event after debounce to support multi-wave responses.
+
+        If the agent continues producing text (new deltas, tool calls, etc.)
+        within the debounce window, the timer is cancelled.  Only when the
+        agent is truly silent the final is fired.
+        """
+        with self._deferred_final_lock:
+            # Cancel any existing timer
+            if self._deferred_final_timer is not None:
+                self._deferred_final_timer.cancel()
+                self._deferred_final_timer = None
+
+            self._deferred_final_info = {
+                "run_id": run_id,
+                "session_key": session_key,
+                "seq": seq,
+                "content": content,
+            }
+
+            self._deferred_final_timer = threading.Timer(
+                self._lifecycle_final_debounce_s,
+                self._fire_deferred_final,
+            )
+            self._deferred_final_timer.daemon = True
+            self._deferred_final_timer.start()
+
+        self._log_ws(
+            f"Deferred final scheduled ({self._lifecycle_final_debounce_s}s debounce, "
+            f"runId={run_id[:12] if run_id else 'none'})",
+            "DEBUG",
+        )
+
+    def _cancel_deferred_final(self):
+        """Cancel pending deferred final — agent is still active."""
+        with self._deferred_final_lock:
+            if self._deferred_final_timer is None:
+                return
+            self._deferred_final_timer.cancel()
+            self._deferred_final_timer = None
+            self._deferred_final_info = None
+        self._log_ws("Deferred final cancelled (agent still active)", "DEBUG")
+
+    def _fire_deferred_final(self):
+        """Called by the debounce timer — agent has been silent, emit final."""
+        with self._deferred_final_lock:
+            info = self._deferred_final_info
+            self._deferred_final_info = None
+            self._deferred_final_timer = None
+
+        if info is None:
+            return
+
+        self._log_ws(
+            f"Deferred final fired (runId={info['run_id'][:12] if info.get('run_id') else 'none'})",
+            "INFO",
+        )
+
+        # Use accumulated text as the final content (has ALL waves)
+        with self._buffer_lock:
+            full_text = self._accumulated_text or self._full_response or ""
+
+        synthetic = {
+            "runId": info["run_id"],
+            "sessionKey": info["session_key"],
+            "seq": info["seq"],
+            "state": "final",
+        }
+        if full_text:
+            synthetic["message"] = {"content": full_text}
+
+        self._handle_chat_event(synthetic)
 
     def _handle_chat_event(self, payload: dict):
         """Обрабатывает chat events (delta/final/error/aborted)."""
@@ -973,6 +1067,10 @@ class OpenClawWebSocket:
             self._current_run_id = run_id
 
         if state == "delta":
+            # New text arriving — cancel any pending deferred final
+            # (direct gateway delta, not just agent stream).
+            self._cancel_deferred_final()
+
             # Частичный ответ (streaming token)
             # ВАЖНО: разные провайдеры могут присылать delta в двух форматах:
             # 1) cumulative: content = весь накопленный текст
@@ -1282,6 +1380,7 @@ class OpenClawWebSocket:
                 return False
 
         # Сбрасываем состояние стриминга перед новым запросом
+        self._cancel_deferred_final()  # new request overrides any pending final
         acquired = self._buffer_lock.acquire(timeout=3.0)
         if acquired:
             try:
@@ -1355,6 +1454,7 @@ class OpenClawWebSocket:
 
     def cancel(self) -> bool:
         """Прерывает текущую обработку через chat.abort (протокол v3)."""
+        self._cancel_deferred_final()  # cancel overrides pending final
         self._log_ws("Cancel requested (chat.abort)", "WARN")
 
         if self._is_authenticated and (self._is_processing or self._is_streaming):
@@ -1409,6 +1509,7 @@ class OpenClawWebSocket:
 
     def close(self):
         """Закрывает WebSocket соединение."""
+        self._cancel_deferred_final()
         self._log_ws("Closing connection...", "INFO")
         self._stop_event.set()
 
