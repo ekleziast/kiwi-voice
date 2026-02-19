@@ -63,12 +63,14 @@ class OpenClawWebSocket:
         on_token: Optional[Callable[[str], None]] = None,
         on_complete: Optional[Callable[[str], None]] = None,
         on_activity: Optional[Callable[[dict], None]] = None,
+        on_resume: Optional[Callable] = None,
         log_func: Optional[Callable] = None,
     ):
         self.config = config
         self.on_token = on_token
         self.on_complete = on_complete
         self.on_activity = on_activity
+        self.on_resume = on_resume
         self._log = log_func if log_func else (kiwi_log if UTILS_AVAILABLE else print)
 
         # WebSocket state
@@ -970,6 +972,14 @@ class OpenClawWebSocket:
             self._deferred_final_timer = None
             self._deferred_final_info = None
         self._log_ws("Deferred final cancelled (agent still active)", "DEBUG")
+
+        # Notify service that agent continues after what looked like the end.
+        # This lets the service restart the status announcer for the next work phase.
+        if self.on_resume:
+            try:
+                self.on_resume()
+            except Exception:
+                pass
 
     def _fire_deferred_final(self):
         """Called by the debounce timer — agent has been silent, emit final."""

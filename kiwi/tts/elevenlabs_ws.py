@@ -42,6 +42,7 @@ class ElevenLabsWSStreamManager:
         on_playback_done: Optional[Callable] = None,
         is_interrupted: Optional[Callable[[], bool]] = None,
         on_connection_lost: Optional[Callable] = None,
+        on_playback_idle: Optional[Callable] = None,
     ):
         self._api_key = api_key
         self._voice_id = voice_id
@@ -56,6 +57,7 @@ class ElevenLabsWSStreamManager:
         self._on_playback_done = on_playback_done
         self._is_interrupted = is_interrupted
         self._on_connection_lost = on_connection_lost
+        self._on_playback_idle = on_playback_idle
 
         self._ws = None
         self._buffer = ""
@@ -447,6 +449,8 @@ class ElevenLabsWSStreamManager:
         stream = None
         notified_start = False
         interrupted = False
+        idle_since = None        # track when playback went idle (no audio)
+        idle_notified = False    # whether on_playback_idle was already fired
 
         try:
             while True:
@@ -480,6 +484,20 @@ class ElevenLabsWSStreamManager:
                 if not pending:
                     if stream_ended:
                         break
+                    # Track idle state: no audio being written.
+                    # After 2s of idle, notify so the service can announce
+                    # task status between response waves.
+                    if notified_start:
+                        now = time.monotonic()
+                        if idle_since is None:
+                            idle_since = now
+                        elif not idle_notified and (now - idle_since) > 2.0:
+                            idle_notified = True
+                            if self._on_playback_idle:
+                                try:
+                                    self._on_playback_idle()
+                                except Exception:
+                                    pass
                     continue
 
                 if pending_samples < min_samples and not stream_ended:
@@ -488,6 +506,12 @@ class ElevenLabsWSStreamManager:
                 if self._stop_event.is_set():
                     interrupted = True
                     break
+
+                # Audio arrived — reset idle tracking
+                if idle_notified:
+                    idle_notified = False
+                    kiwi_log("ELEVENLABS-WS", "Playback resumed after idle", level="DEBUG")
+                idle_since = None
 
                 # Concatenate batch
                 combined = np.concatenate(pending) if len(pending) > 1 else pending[0]

@@ -197,6 +197,19 @@ class TTSSpeechMixin:
                     self._task_status_announcer.stop()
                     self._task_status_announcer = None
 
+            def _ws_on_playback_idle():
+                """ElevenLabs WS has no audio to play — mark speaking as done
+                so the status announcer can speak between response waves."""
+                kiwi_log("KIWI", "ElevenLabs WS playback idle (inter-wave gap)", level="DEBUG")
+                self._is_speaking = False
+                if hasattr(self, "listener") and self.listener:
+                    self.listener._tts_start_time = time.time()
+                try:
+                    if self._task_status_announcer:
+                        self._task_status_announcer.on_tts_playing(False)
+                except Exception:
+                    pass
+
             self._streaming_tts_manager = ElevenLabsWSStreamManager(
                 api_key=self.config.tts_elevenlabs_api_key,
                 voice_id=self.config.tts_elevenlabs_voice_id,
@@ -209,6 +222,7 @@ class TTSSpeechMixin:
                 on_playback_done=_ws_on_playback_done,
                 is_interrupted=_ws_is_interrupted,
                 on_connection_lost=_ws_on_connection_lost,
+                on_playback_idle=_ws_on_playback_idle,
             )
             kiwi_log("KIWI", "Using ElevenLabs WS streaming", level="INFO")
         else:
@@ -224,10 +238,18 @@ class TTSSpeechMixin:
             )
 
         self._streaming_tts_manager.start()
+        self._create_status_announcer(command, intervals=[6, 20, 45, 90, 150])
+
+    def _create_status_announcer(self, command: str, intervals: list = None):
+        """Create and start a TaskStatusAnnouncer with a stop-aware speak wrapper."""
+        from kiwi.task_announcer import TaskStatusAnnouncer
+
+        if self._task_status_announcer:
+            self._task_status_announcer.stop_nowait()
 
         self._task_status_announcer = TaskStatusAnnouncer(
             speak_func=self._speak_chunk,
-            intervals=[6, 20, 45, 90, 150]
+            intervals=intervals or [6, 20, 45, 90, 150],
         )
 
         # Replace speak_func with a stop-aware wrapper that checks the

@@ -45,6 +45,25 @@ class LLMCallbacksMixin:
             return
         self._task_status_announcer.on_activity(message)
 
+    def _on_llm_resume(self):
+        """Agent continues after lifecycle:end — restart status announcer.
+
+        Called via on_resume callback when deferred final is cancelled,
+        meaning the agent is doing more work (tool calls, research steps)
+        after what initially looked like the end of the response.
+        """
+        # Only restart if we're in a streaming session and announcer is dead
+        if not self._streaming_tts_manager:
+            return
+        if self._task_status_announcer is not None:
+            return
+
+        kiwi_log("LLM", "Agent continues — restarting status announcer for inter-wave updates", level="INFO")
+        self._create_status_announcer(
+            "продолжаю выполнение",
+            intervals=[5, 15, 30, 60, 120],
+        )
+
     def _on_llm_complete(self, full_text: str):
         """Callback when LLM generation is complete (WebSocket final event)."""
         self._stop_stream_watchdog()
