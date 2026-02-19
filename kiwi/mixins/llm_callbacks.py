@@ -125,24 +125,15 @@ class LLMCallbacksMixin:
             self._task_status_announcer.stop()
             self._task_status_announcer = None
 
-        # Check if WS connection was lost mid-stream before stopping the manager
-        ws_connection_lost = (
-            self._streaming_tts_manager is not None
-            and hasattr(self._streaming_tts_manager, 'connection_lost')
-            and self._streaming_tts_manager.connection_lost
-        )
-
         if self._streaming_tts_manager:
             self._streaming_tts_manager.stop()
             self._streaming_tts_manager = None
 
-        # Safety fallback: speak full text if no playback started OR if WS died mid-stream
-        needs_fallback = (not self._streaming_response_playback_started) or ws_connection_lost
-        if needs_fallback and full_text and full_text.strip():
-            if ws_connection_lost:
-                kiwi_log("STREAM-TTS", "WS connection lost mid-stream, falling back to full speak()", level="WARNING")
-            else:
-                kiwi_log("STREAM-TTS", "No playback started for this response, using fallback speak()", level="WARNING")
+        # Safety fallback: speak full text only if streaming never started playback.
+        # If playback started, audio was delivered — even if the WS later died
+        # (idle timeout between waves), the graceful stop drains the queue.
+        if not self._streaming_response_playback_started and full_text and full_text.strip():
+            kiwi_log("STREAM-TTS", "No playback started for this response, using fallback speak()", level="WARNING")
             self.speak(full_text, style=self._streaming_style)
             if not self._barge_in_requested:
                 self._start_idle_timer()
