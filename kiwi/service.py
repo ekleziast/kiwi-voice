@@ -343,6 +343,7 @@ class KiwiServiceOpenClaw(
                     on_complete=self._on_llm_complete,
                     on_activity=self._on_agent_activity,
                     on_resume=self._on_llm_resume,
+                    on_wave_end=self._on_wave_end,
                     log_func=kiwi_log if UTILS_AVAILABLE else print,
                 )
                 if ws_client.connect():

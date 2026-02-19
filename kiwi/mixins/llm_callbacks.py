@@ -64,6 +64,11 @@ class LLMCallbacksMixin:
             intervals=[5, 15, 30, 60, 120],
         )
 
+    def _on_wave_end(self):
+        """lifecycle:end arrived — flush ElevenLabs WS buffer between waves."""
+        if self._streaming_tts_manager and hasattr(self._streaming_tts_manager, 'flush_wave'):
+            self._streaming_tts_manager.flush_wave()
+
     def _on_llm_complete(self, full_text: str):
         """Callback when LLM generation is complete (WebSocket final event)."""
         self._stop_stream_watchdog()

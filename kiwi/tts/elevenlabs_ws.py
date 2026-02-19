@@ -227,6 +227,24 @@ class ElevenLabsWSStreamManager:
             self._buffer += cleaned
             self._flush_buffer()
 
+    def flush_wave(self):
+        """Flush remaining buffer between response waves (without stopping).
+
+        Called when lifecycle:end arrives but the manager stays alive
+        in case the agent continues with another wave.
+        """
+        if not self._is_active or not self._ws_connected:
+            return
+        with self._lock:
+            remaining = self._buffer.strip()
+            if remaining:
+                self._send_text(remaining, flush=True)
+                self._buffer = ""
+                self._unflushed_chars = 0
+                kiwi_log("ELEVENLABS-WS",
+                         f"Wave flush: sent remaining {len(remaining)} chars",
+                         level="INFO")
+
     def stop(self, graceful: bool = True):
         """Stop the WS streaming manager.
 

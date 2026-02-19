@@ -64,6 +64,7 @@ class OpenClawWebSocket:
         on_complete: Optional[Callable[[str], None]] = None,
         on_activity: Optional[Callable[[dict], None]] = None,
         on_resume: Optional[Callable] = None,
+        on_wave_end: Optional[Callable] = None,
         log_func: Optional[Callable] = None,
     ):
         self.config = config
@@ -71,6 +72,7 @@ class OpenClawWebSocket:
         self.on_complete = on_complete
         self.on_activity = on_activity
         self.on_resume = on_resume
+        self.on_wave_end = on_wave_end
         self._log = log_func if log_func else (kiwi_log if UTILS_AVAILABLE else print)
 
         # WebSocket state
@@ -869,6 +871,13 @@ class OpenClawWebSocket:
                 # with debounce so that multi-wave responses are kept intact.
                 final_content = data.get("text", data.get("content", ""))
                 self._current_run_id = None  # allow next wave's events through
+                # Flush TTS buffer so the last word of this wave doesn't get
+                # concatenated with the first word of the next wave.
+                if self.on_wave_end:
+                    try:
+                        self.on_wave_end()
+                    except Exception:
+                        pass
                 self._schedule_deferred_final(run_id, session_key, seq, final_content)
                 return
 
