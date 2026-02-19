@@ -100,7 +100,7 @@ class StreamWatchdogMixin:
                 effective_timeout = post_progress_timeout
 
             if activity_stalled_for < 5.0:
-                effective_timeout = max(effective_timeout, 45.0)
+                effective_timeout = max(effective_timeout, 90.0)
 
             if stalled_for > timeout_s:
                 kiwi_log("STREAM-WATCHDOG",

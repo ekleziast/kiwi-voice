@@ -1172,7 +1172,19 @@ class OpenClawWebSocket:
                         self._full_response = self._accumulated_text
                         self._log_ws(f"Chat final (fallback): using accumulated {len(self._full_response)} chars", "WARN")
                     elif not self._full_response:
-                        self._log_ws("Chat final: EMPTY content and no accumulated text!", "ERROR")
+                        # Gateway sent an empty final with no prior deltas.
+                        # This is likely a race condition — the real response
+                        # will arrive under a new runId.  Don't finalize;
+                        # clear _current_run_id so the next runId's events
+                        # pass the stale filter.  The stream watchdog will
+                        # finalize if no real response ever comes.
+                        self._log_ws(
+                            "Chat final: EMPTY (no content, no accumulated text). "
+                            "Clearing runId to accept retry from gateway.",
+                            "WARNING",
+                        )
+                        self._current_run_id = None
+                        return
 
             # Вызываем on_complete только для финального ответа
             # Это остановит StreamingTTSManager и отправит остаток буфера
