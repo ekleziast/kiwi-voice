@@ -1517,6 +1517,17 @@ class KiwiListener:
                     silence_counter += 1
                     audio_buffer.append(audio_chunk)
                     
+
+                    # === FIX: Reset Silero VAD hidden state on silence entry ===
+                    # Silero VAD is recurrent (LSTM). After real speech its hidden
+                    # state stays "speech-biased", causing VAD DOWNGRADE to miss
+                    # noise spikes, which reset silence_counter indefinitely.
+                    # Resetting after 2 quiet chunks (~0.6s) gives fresh state.
+                    if silence_counter == 2 and self._vad_model is not None:
+                        if hasattr(self._vad_model, 'reset_states'):
+                            self._vad_model.reset_states()
+                            kiwi_log("VAD", "Reset Silero hidden state (silence phase, anti-stale)")
+
                     # === РђР”РђРџРўРР’РќРђРЇ РџРђРЈР—Рђ: РІС‹С‡РёСЃР»СЏРµРј РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊ СЂРµС‡Рё ===
                     current_speech_duration = time.time() - speech_start_time if speech_start_time else 0
                     required_silence = self._get_silence_duration(current_speech_duration)
