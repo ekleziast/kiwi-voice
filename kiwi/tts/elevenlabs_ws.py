@@ -71,6 +71,7 @@ class ElevenLabsWSStreamManager:
         self._eos_sent = False
         self._is_final_received = False
         self.connection_lost = False
+        self._token_idle_timer: Optional[threading.Timer] = None
 
     # ------------------------------------------------------------------
     # Token cleaning (same logic as StreamingTTSManager._clean_token)
@@ -157,6 +158,7 @@ class ElevenLabsWSStreamManager:
         import websocket as _websocket
 
         self._stop_event.clear()
+        self._cancel_token_idle_timer()
         self._buffer = ""
         self._unflushed_chars = 0
         self._eos_sent = False
@@ -227,6 +229,10 @@ class ElevenLabsWSStreamManager:
             self._buffer += cleaned
             self._flush_buffer()
 
+        # Reset idle flush timer — if no more tokens arrive within 2s,
+        # flush the remaining buffer so ElevenLabs generates audio.
+        self._reset_token_idle_timer()
+
     def flush_wave(self):
         """Flush remaining buffer between response waves (without stopping).
 
@@ -245,6 +251,35 @@ class ElevenLabsWSStreamManager:
                          f"Wave flush: sent remaining {len(remaining)} chars",
                          level="INFO")
 
+    def _reset_token_idle_timer(self):
+        """Reset the timer that flushes stale buffer after no tokens for 2s."""
+        if self._token_idle_timer is not None:
+            self._token_idle_timer.cancel()
+        self._token_idle_timer = threading.Timer(2.0, self._flush_idle_buffer)
+        self._token_idle_timer.daemon = True
+        self._token_idle_timer.start()
+
+    def _cancel_token_idle_timer(self):
+        """Cancel the token idle flush timer."""
+        if self._token_idle_timer is not None:
+            self._token_idle_timer.cancel()
+            self._token_idle_timer = None
+
+    def _flush_idle_buffer(self):
+        """Flush remaining buffer after a period of no tokens."""
+        self._token_idle_timer = None
+        if not self._is_active or not self._ws_connected:
+            return
+        with self._lock:
+            remaining = self._buffer.strip()
+            if remaining:
+                self._send_text(remaining, flush=True)
+                self._buffer = ""
+                self._unflushed_chars = 0
+                kiwi_log("ELEVENLABS-WS",
+                         f"Token idle flush: sent {len(remaining)} chars",
+                         level="INFO")
+
     def stop(self, graceful: bool = True):
         """Stop the WS streaming manager.
 
@@ -253,6 +288,7 @@ class ElevenLabsWSStreamManager:
         """
         kiwi_log("ELEVENLABS-WS",
                   f"Stopping (graceful={graceful})", level="INFO")
+        self._cancel_token_idle_timer()
         self._is_active = False
 
         if not graceful:
