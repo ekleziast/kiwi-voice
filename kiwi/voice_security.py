@@ -245,27 +245,54 @@ class TelegramApprovalClient:
     def _handle_callback(self, callback: dict):
         """Обрабатывает нажатие кнопки."""
         callback_data = callback.get("data", "")
+        callback_id = callback.get("id", "")
         message_id = callback.get("message", {}).get("message_id")
-        
-        # Проверяем ожидающие подтверждения
-        key = callback_data.split("_")[0] if "_" in callback_data else callback_data
-        
+
+        # callback_data format: "{key}_approve" or "{key}_deny"
+        # where key = "kiwi_{timestamp}".  Split from the RIGHT to
+        # separate the action ("approve"/"deny") from the compound key.
+        if "_" in callback_data:
+            key, action = callback_data.rsplit("_", 1)
+        else:
+            key, action = callback_data, "deny"
+
+        approved = (action == "approve")
+
         with self._lock:
             if key in self.pending_approvals:
                 approval = self.pending_approvals[key]
-                response = callback_data.split("_")[1] if "_" in callback_data else "deny"
-                
-                # Вызываем callback
-                if key in self._callbacks:
-                    try:
-                        self._callbacks[key](response == "approve", approval)
-                    except Exception as e:
-                        kiwi_log("VOICE_SECURITY", f"Callback error: {e}", level="ERROR")
-                
+                cb = self._callbacks.get(key)
+
                 # Удаляем из очереди
                 del self.pending_approvals[key]
-                if key in self._callbacks:
-                    del self._callbacks[key]
+                self._callbacks.pop(key, None)
+            else:
+                approval = None
+                cb = None
+
+        if approval and cb:
+            kiwi_log("VOICE_SECURITY",
+                     f"Telegram {'approved' if approved else 'denied'}: {approval.command[:60]}",
+                     level="INFO")
+            try:
+                cb(approved, approval)
+            except Exception as e:
+                kiwi_log("VOICE_SECURITY", f"Callback error: {e}", level="ERROR")
+        elif not approval:
+            kiwi_log("VOICE_SECURITY",
+                     f"Callback for unknown/expired key: {key}", level="WARNING")
+
+        # Answer the callback query so the button stops showing a spinner
+        if callback_id:
+            try:
+                answer_text = "✅ Принято!" if approved else "❌ Отклонено"
+                url = f"https://api.telegram.org/bot{self.bot_token}/answerCallbackQuery"
+                requests.post(url, json={
+                    "callback_query_id": callback_id,
+                    "text": answer_text,
+                }, timeout=5)
+            except Exception:
+                pass
     
     def send_approval_request(
         self,
