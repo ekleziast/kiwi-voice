@@ -13,7 +13,7 @@
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
   <a href="https://github.com/openclaw/openclaw"><img src="https://img.shields.io/badge/backend-OpenClaw-orange.svg" alt="OpenClaw"></a>
   <br>
-  <a href="https://ekleziast.github.io/kiwi-website/"><strong>Website</strong></a> &middot;
+  <a href="https://kiwi-voice.com"><strong>Website</strong></a> &middot;
   <a href="https://github.com/ekleziast/kiwi-voice/issues">Issues</a> &middot;
   <a href="https://docs.openclaw.ai">OpenClaw Docs</a>
 </p>
