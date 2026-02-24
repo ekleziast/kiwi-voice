@@ -35,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchLanguages();
     fetchSouls();
     fetchSpeakers();
+    fetchConfig();
     connectWebSocket();
 
     // Poll status every 5 seconds as a fallback
@@ -105,6 +106,41 @@ async function fetchSouls() {
         updateSoulsGrid(data);
     } catch (err) {
         // Silently ignore on first load
+    }
+}
+
+/**
+ * Fetch current config from /api/config
+ */
+async function fetchConfig() {
+    try {
+        const resp = await fetch(`${API_BASE}/config`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        updateConfig(data);
+    } catch (err) {
+        // Silently ignore on first load
+    }
+}
+
+/**
+ * Update the config card from API response.
+ */
+function updateConfig(data) {
+    const set = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value || '--';
+    };
+    set('config-wake-word', data.wake_word);
+    set('config-stt-model', data.stt_model);
+    set('config-stt-device', data.stt_device);
+    set('config-llm-model', data.llm_model);
+    set('config-sample-rate', data.sample_rate ? `${data.sample_rate} Hz` : null);
+
+    // Update header version with key config info
+    const versionEl = document.getElementById('header-version');
+    if (versionEl && data.stt_model) {
+        versionEl.textContent = `STT: ${data.stt_model} | ${(data.stt_device || 'cpu').toUpperCase()}`;
     }
 }
 
@@ -301,6 +337,7 @@ function pollUntilReady(attempts) {
             if (r.ok) {
                 showToast('Service restarted', 'success');
                 fetchStatus();
+                fetchConfig();
                 fetchSouls();
                 fetchSpeakers();
             } else {
@@ -494,10 +531,12 @@ function updateStatus(status) {
     langEl.textContent = status.language || '--';
 
     // Active soul
-    if (status.active_soul) {
-        const soulEl = document.getElementById('status-soul');
-        if (soulEl) {
+    const soulEl = document.getElementById('status-soul');
+    if (soulEl) {
+        if (status.active_soul) {
             soulEl.textContent = status.active_soul.name + (status.active_soul.nsfw ? ' (18+)' : '');
+        } else {
+            soulEl.textContent = '--';
         }
     }
 

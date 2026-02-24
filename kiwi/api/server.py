@@ -731,11 +731,19 @@ class KiwiAPI:
         <li><span class="endpoint">GET /api/config</span> - Current configuration</li>
         <li><span class="endpoint">PATCH /api/config</span> - Update configuration</li>
         <li><span class="endpoint">GET /api/speakers</span> - Speaker profiles</li>
+        <li><span class="endpoint">DELETE /api/speakers/{id}</span> - Delete speaker</li>
+        <li><span class="endpoint">POST /api/speakers/{id}/block</span> - Block speaker</li>
+        <li><span class="endpoint">POST /api/speakers/{id}/unblock</span> - Unblock speaker</li>
         <li><span class="endpoint">GET /api/languages</span> - Available languages</li>
         <li><span class="endpoint">POST /api/language</span> - Switch language</li>
+        <li><span class="endpoint">GET /api/souls</span> - List personalities</li>
+        <li><span class="endpoint">GET /api/soul/current</span> - Current personality</li>
+        <li><span class="endpoint">POST /api/soul</span> - Switch personality</li>
         <li><span class="endpoint">POST /api/tts/test</span> - Test TTS</li>
         <li><span class="endpoint">POST /api/stop</span> - Stop playback</li>
         <li><span class="endpoint">POST /api/reset-context</span> - Reset context</li>
+        <li><span class="endpoint">POST /api/restart</span> - Restart service</li>
+        <li><span class="endpoint">POST /api/shutdown</span> - Shutdown service</li>
         <li><span class="endpoint">GET /api/events</span> - WebSocket events</li>
     </ul>
     <script>

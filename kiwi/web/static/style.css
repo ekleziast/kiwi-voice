@@ -332,6 +332,12 @@ body {
     flex-wrap: wrap;
 }
 
+/* --- Config Card --- */
+.config-card .status-value {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+}
+
 /* --- Buttons --- */
 .btn {
     display: inline-flex;
