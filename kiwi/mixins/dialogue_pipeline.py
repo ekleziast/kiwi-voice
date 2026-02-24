@@ -173,7 +173,7 @@ class DialoguePipelineMixin:
                             soul_id = self._soul_manager.find_soul_by_name(rest)
                             if soul_id:
                                 self._soul_manager.switch_soul(soul_id)
-                                self._system_prompt_sent = False  # Force re-send with new soul
+                                self._apply_soul_session()
                                 soul = self._soul_manager.get_soul(soul_id)
                                 self.speak(t("responses.soul_switched", name=soul.name), style="cheerful")
                                 ctx.abort = True
@@ -187,7 +187,7 @@ class DialoguePipelineMixin:
             nsfw_patterns = t("commands.nsfw_enable_patterns")
             if isinstance(nsfw_patterns, list) and any(p in command_lower for p in nsfw_patterns):
                 self._soul_manager.switch_soul("nsfw")
-                self._system_prompt_sent = False
+                self._apply_soul_session()
                 self.speak(t("responses.nsfw_enabled"), style="neutral")
                 ctx.abort = True
                 return
@@ -196,7 +196,7 @@ class DialoguePipelineMixin:
             default_patterns = t("commands.default_mode_patterns")
             if isinstance(default_patterns, list) and any(p in command_lower for p in default_patterns):
                 self._soul_manager.switch_to_default()
-                self._system_prompt_sent = False
+                self._apply_soul_session()
                 self.speak(t("responses.soul_reset"), style="cheerful")
                 ctx.abort = True
                 return
@@ -445,6 +445,13 @@ class DialoguePipelineMixin:
     # Dispatch helpers
     # ------------------------------------------------------------------
 
+    def _apply_soul_session(self):
+        """Apply session switch from active soul and reset prompt state."""
+        self._system_prompt_sent = False
+        if self._soul_manager and hasattr(self, 'openclaw') and self.openclaw:
+            session = self._soul_manager.get_session_override()
+            self.openclaw.switch_session(session)  # None reverts to default
+
     def _dispatch_streaming(self, ctx: CommandContext) -> None:
         """Streaming: launch TTS manager and send message via WebSocket."""
         kiwi_log("KIWI", "Using streaming LLM + TTS", level="INFO")
@@ -464,18 +471,14 @@ class DialoguePipelineMixin:
             else:
                 system_prompt = self.config.voice_system_prompt
 
-            model_override = self._soul_manager.get_model_override() if self._soul_manager else None
-
             kiwi_log("KIWI", f"Sending first message with system prompt (soul: {self._soul_manager.active_soul_id if self._soul_manager else 'none'})", level="INFO")
             success = self.openclaw.send_message(
                 ctx.command,
                 context=system_prompt,
-                model_override=model_override,
             )
             self._system_prompt_sent = True
         else:
-            model_override = self._soul_manager.get_model_override() if self._soul_manager else None
-            success = self.openclaw.send_message(ctx.command, model_override=model_override)
+            success = self.openclaw.send_message(ctx.command)
 
         if not success:
             kiwi_log("KIWI", "Failed to send message via WebSocket", level="ERROR")

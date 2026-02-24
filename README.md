@@ -180,46 +180,6 @@ Set `KIWI_TELEGRAM_BOT_TOKEN` and `KIWI_TELEGRAM_CHAT_ID` in `.env` to enable.
 
 See `.env.example` for the full list.
 
-## Project Structure
-
-```
-kiwi-voice/
-├── kiwi/                    # Main Python package
-│   ├── service.py           # Core orchestrator
-│   ├── listener.py          # Audio capture, Whisper STT, wake word, VAD
-│   ├── speaker_id.py        # Voiceprint extraction (pyannote)
-│   ├── speaker_manager.py   # Priority hierarchy + hot cache
-│   ├── voice_security.py    # Dangerous command detection + Telegram approval
-│   ├── openclaw_ws.py       # WebSocket client (OpenClaw Gateway v3)
-│   ├── config_loader.py     # YAML/env config loading
-│   ├── text_processing.py   # Text cleanup and sentence splitting for TTS
-│   ├── unified_vad.py       # Voice Activity Detection
-│   ├── hardware_aec.py      # Acoustic Echo Cancellation
-│   ├── task_announcer.py    # Long-running task status announcer
-│   ├── i18n.py              # Lightweight i18n module (YAML locale loader)
-│   ├── locales/             # Locale files (ru.yaml, en.yaml, ...)
-│   ├── mixins/              # Service mixin modules
-│   │   ├── audio_playback.py    # Audio output and playback control
-│   │   ├── dialogue_pipeline.py # LLM dialogue orchestration
-│   │   ├── llm_callbacks.py     # LLM streaming callbacks
-│   │   ├── stream_watchdog.py   # Stream stall detection and recovery
-│   │   └── tts_speech.py        # TTS synthesis and streaming playback
-│   └── tts/                 # TTS providers
-│       ├── elevenlabs.py
-│       ├── elevenlabs_ws.py  # WebSocket input streaming
-│       ├── piper.py
-│       ├── qwen_local.py
-│       ├── runpod.py
-│       └── streaming.py     # Sentence-aware streaming manager
-├── runpod/                  # RunPod serverless deployment (Qwen3-TTS)
-├── scripts/                 # Utility scripts
-├── sounds/                  # Audio assets (startup, confirmation, idle)
-├── tests/                   # Smoke tests
-├── config.yaml              # Main configuration
-├── .env.example             # Secret template
-└── pyproject.toml           # Package metadata
-```
-
 ## Development
 
 ```bash
@@ -258,6 +218,27 @@ Currently shipped — **15 languages:**
 | `pl` Polish | `zh` Chinese | `ja` Japanese | `ko` Korean |
 | `hi` Hindi | `ar` Arabic | `id` Indonesian | |
 
+## Soul System (Personalities)
+
+Kiwi supports dynamic personality switching via markdown-based "souls" in `kiwi/souls/`. Each soul defines a system prompt overlay that shapes how Kiwi responds.
+
+**Built-in souls:** Mindful Companion (default), Storyteller, Comedian, Hype Person, NSFW (18+)
+
+Switch via voice command, Web UI, or API:
+```bash
+# API
+curl -X POST http://localhost:7789/api/soul -d '{"soul_id": "comedian"}'
+```
+
+The NSFW soul routes to a separate OpenClaw agent with its own LLM model (e.g. `mistral-7b-instruct`), configured in `config.yaml`:
+```yaml
+souls:
+  default: "mindful-companion"
+  nsfw:
+    model: "openrouter/mistralai/mistral-7b-instruct"
+    session: "kiwi-nsfw"
+```
+
 ## REST API & Web UI
 
 Kiwi includes a built-in REST API and web dashboard:
@@ -268,7 +249,7 @@ Kiwi includes a built-in REST API and web dashboard:
 http://localhost:7789/
 ```
 
-**API endpoints:** `/api/status`, `/api/config`, `/api/speakers`, `/api/languages`, `/api/tts/test`, `/api/stop`, `/api/reset-context`, plus WebSocket `/api/events` for real-time streaming.
+**API endpoints:** `/api/status`, `/api/config`, `/api/speakers`, `/api/languages`, `/api/souls`, `/api/soul`, `/api/tts/test`, `/api/stop`, `/api/reset-context`, `/api/restart`, `/api/shutdown`, plus WebSocket `/api/events` for real-time streaming.
 
 Configure in `config.yaml`:
 ```yaml

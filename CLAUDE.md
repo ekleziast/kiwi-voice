@@ -46,92 +46,6 @@ Microphone (24kHz) → Audio Callback (energy + Silero VAD) → Audio Queue
   → Loop back to listening
 ```
 
-### Package Structure
-
-```
-kiwi-voice/
-  kiwi/                          # Python package
-    __init__.py                  # PROJECT_ROOT + version
-    __main__.py                  # python -m kiwi
-    service.py                   # Main orchestrator (KiwiServiceOpenClaw) + main()
-    config_loader.py             # YAML/env config loading, KiwiConfig dataclass
-    i18n.py                      # Lightweight i18n module (YAML locale loader, t() function)
-    state_machine.py             # DialogueState definitions
-    text_processing.py           # TTS text cleaning/splitting helpers
-    utils.py                     # kiwi_log() + crash protection
-    event_bus.py                 # Pub/sub event system (EventBus, EventType)
-    listener.py                  # Audio recording, Whisper STT, wake word, VAD
-    speaker_id.py                # Speaker embedding extraction (pyannote)
-    speaker_manager.py           # Voice priority hierarchy + hot cache
-    voice_security.py            # Dangerous command detection + Telegram approval
-    unified_vad.py               # Voice Activity Detection pipeline
-    hardware_aec.py              # Acoustic Echo Cancellation
-    openclaw_ws.py               # WebSocket client for OpenClaw Gateway v3
-    openclaw_cli.py              # CLI client for OpenClaw
-    task_announcer.py            # Long-task status announcer
-    api/                         # REST API server
-      __init__.py
-      server.py                  # aiohttp server (port 7789) + WebSocket events
-    web/                         # Web UI dashboard
-      index.html                 # Single-page app
-      static/
-        style.css                # Dark theme styles
-        app.js                   # Dashboard logic
-    locales/                     # i18n locale files
-      __init__.py
-      ru.yaml                    # Russian (default)
-      en.yaml                    # English
-      es.yaml                    # Spanish
-      pt.yaml                    # Portuguese
-      fr.yaml                    # French
-      it.yaml                    # Italian
-      de.yaml                    # German
-      tr.yaml                    # Turkish
-      pl.yaml                    # Polish
-      zh.yaml                    # Chinese (Simplified)
-      ja.yaml                    # Japanese
-      ko.yaml                    # Korean
-      hi.yaml                    # Hindi
-      ar.yaml                    # Arabic
-      id.yaml                    # Indonesian
-    mixins/                      # Service mixin modules
-      audio_playback.py          # Audio output and playback control
-      dialogue_pipeline.py       # LLM dialogue orchestration
-      llm_callbacks.py           # LLM streaming callbacks
-      stream_watchdog.py         # Stream stall detection and recovery
-      tts_speech.py              # TTS synthesis and streaming playback
-    tts/                         # TTS subpackage
-      __init__.py                # Re-exports from base
-      base.py                    # TTSProvider protocol, cache mixin, constants
-      elevenlabs.py              # ElevenLabs TTS client
-      elevenlabs_ws.py           # ElevenLabs WebSocket streaming
-      piper.py                   # Local Piper TTS (ONNX)
-      qwen_local.py              # Local Qwen3-TTS (GPU/CPU)
-      runpod.py                  # RunPod serverless TTS client
-      streaming.py               # Streaming TTS manager
-  custom_components/             # Home Assistant integration
-    kiwi_voice/
-      __init__.py                # HA entry point
-      config_flow.py             # Config UI flow
-      coordinator.py             # API polling coordinator
-      sensor.py                  # State, language, speakers, uptime sensors
-      switch.py                  # Listening on/off switch
-      button.py                  # Stop, reset, TTS test buttons
-      tts.py                     # TTS platform
-      manifest.json
-  scripts/                       # Standalone utilities
-  runpod/                        # Standalone RunPod deployment
-  tests/
-    test_smoke.py
-  sounds/                        # Audio assets
-  models/                        # ML models
-  piper-models/                  # Piper ONNX models
-  voice_profiles/                # Speaker profiles
-  tts_cache/                     # TTS disk cache
-  config.yaml                    # Runtime configuration
-  pyproject.toml                 # Package metadata
-```
-
 ### Speaker Priority System
 
 ```python
@@ -264,6 +178,17 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 Console codepage is set for Unicode output via `ctypes.windll.kernel32.SetConsoleCP(65001)`.
 
+## Soul System (Personalities)
+
+Dynamic personality switching via markdown files in `kiwi/souls/`. Managed by `kiwi/soul_manager.py`.
+
+- **SoulManager** loads `.md` files, composes system prompt = base Kiwi context + soul personality
+- **SoulConfig** dataclass: `id`, `name`, `description`, `prompt`, `model` (informational), `session` (OpenClaw session override), `nsfw`
+- NSFW soul routes to a separate OpenClaw agent via session switching (`openclaw_ws.switch_session()`)
+- Config: `souls.default`, `souls.nsfw.model`, `souls.nsfw.session` in config.yaml
+- Voice commands for switching defined in locale files: `soul_switch_patterns`, `nsfw_enable_patterns`, `default_mode_patterns`
+- API: `GET /api/souls`, `GET /api/soul/current`, `POST /api/soul`
+
 ## Key Documentation
 
 - `SKILL.md` — voice commands, security hierarchy, and deployment info (in Russian)
@@ -286,7 +211,7 @@ All planned phases are complete:
 ### REST API
 
 - Server: `kiwi/api/server.py`, runs in background thread on port 7789
-- Endpoints: `/api/status`, `/api/config`, `/api/speakers`, `/api/languages`, `/api/tts/test`, `/api/stop`, `/api/reset-context`
+- Endpoints: `/api/status`, `/api/config`, `/api/speakers`, `/api/languages`, `/api/souls`, `/api/soul`, `/api/tts/test`, `/api/stop`, `/api/reset-context`, `/api/restart`, `/api/shutdown`
 - WebSocket: `/api/events` for real-time EventBus streaming
 - Config: `api.enabled`, `api.host`, `api.port` in config.yaml
 

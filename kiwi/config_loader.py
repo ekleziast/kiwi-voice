@@ -54,6 +54,7 @@ class KiwiConfig:
     # Soul system
     soul_default: str = "mindful-companion"
     soul_nsfw_model: str = "openrouter/mistralai/mistral-7b-instruct"
+    soul_nsfw_session: str = ""  # OpenClaw session ID for NSFW soul (empty = same session)
 
     # LLM settings
     llm_model: str = "openrouter/moonshotai/kimi-k2.5"
@@ -309,8 +310,11 @@ class KiwiConfig:
         if souls_cfg:
             config.soul_default = souls_cfg.get("default", config.soul_default)
             nsfw_cfg = souls_cfg.get("nsfw", {})
-            if isinstance(nsfw_cfg, dict) and nsfw_cfg.get("model"):
-                config.soul_nsfw_model = nsfw_cfg.get("model", config.soul_nsfw_model)
+            if isinstance(nsfw_cfg, dict):
+                if nsfw_cfg.get("model"):
+                    config.soul_nsfw_model = nsfw_cfg.get("model", config.soul_nsfw_model)
+                if nsfw_cfg.get("session"):
+                    config.soul_nsfw_session = nsfw_cfg.get("session", config.soul_nsfw_session)
 
         # WebSocket settings from YAML
         config.ws_enabled = ws_cfg.get("enabled", config.ws_enabled)
@@ -345,6 +349,8 @@ class KiwiConfig:
             config.soul_default = os.getenv("KIWI_SOUL_DEFAULT").strip()
         if os.getenv("KIWI_SOUL_NSFW_MODEL"):
             config.soul_nsfw_model = os.getenv("KIWI_SOUL_NSFW_MODEL").strip()
+        if os.getenv("KIWI_SOUL_NSFW_SESSION"):
+            config.soul_nsfw_session = os.getenv("KIWI_SOUL_NSFW_SESSION").strip()
 
         if os.getenv("KIWI_LANGUAGE"):
             config.language = os.getenv("KIWI_LANGUAGE").strip() or "ru"

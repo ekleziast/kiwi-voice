@@ -21,7 +21,8 @@ class SoulConfig:
     name: str                        # Display name from H1 header
     description: str                 # First paragraph after header
     prompt: str                      # Full soul prompt text (markdown body)
-    model: Optional[str] = None      # LLM model override (None = use default)
+    model: Optional[str] = None      # LLM model hint (informational, displayed in UI)
+    session: Optional[str] = None    # OpenClaw session ID override (None = default)
     nsfw: bool = False               # Whether this is NSFW mode
 
 
@@ -117,9 +118,18 @@ class SoulManager:
             nsfw=nsfw,
         )
 
-    def configure(self, default_soul: str = "", model_overrides: Optional[Dict[str, str]] = None,
+    def configure(self, default_soul: str = "",
+                  model_overrides: Optional[Dict[str, str]] = None,
+                  session_overrides: Optional[Dict[str, str]] = None,
                   nsfw_souls: Optional[List[str]] = None):
-        """Apply external configuration (from config.yaml)."""
+        """Apply external configuration (from config.yaml).
+
+        Args:
+            default_soul: Default soul ID
+            model_overrides: {soul_id: model_name} — informational, shown in UI
+            session_overrides: {soul_id: openclaw_session_id} — actual LLM switching
+            nsfw_souls: List of soul IDs marked as NSFW
+        """
         if default_soul and default_soul in self._souls:
             self._default_soul_id = default_soul
             if self._active_soul_id == self._default_soul_id or self._active_soul_id not in self._souls:
@@ -130,6 +140,11 @@ class SoulManager:
             for soul_id, model in model_overrides.items():
                 if soul_id in self._souls:
                     self._souls[soul_id].model = model
+
+        if session_overrides:
+            for soul_id, session in session_overrides.items():
+                if soul_id in self._souls:
+                    self._souls[soul_id].session = session
 
         if nsfw_souls:
             self._nsfw_souls = set(nsfw_souls)
@@ -188,10 +203,17 @@ class SoulManager:
         return soul.prompt
 
     def get_model_override(self) -> Optional[str]:
-        """Return model override for the active soul, or None for default."""
+        """Return model hint for the active soul, or None for default (informational)."""
         soul = self.get_active_soul()
         if soul and soul.model:
             return soul.model
+        return None
+
+    def get_session_override(self) -> Optional[str]:
+        """Return OpenClaw session ID override for the active soul, or None for default."""
+        soul = self.get_active_soul()
+        if soul and soul.session:
+            return soul.session
         return None
 
     def is_nsfw_active(self) -> bool:
@@ -227,6 +249,7 @@ class SoulManager:
                     "name": s.name,
                     "description": s.description,
                     "model": s.model,
+                    "session": s.session,
                     "nsfw": s.nsfw,
                     "active": s.id == self._active_soul_id,
                 }

@@ -134,6 +134,8 @@ class KiwiAPI:
         router.add_post("/api/tts/test", self._handle_tts_test)
         router.add_post("/api/stop", self._handle_stop)
         router.add_post("/api/reset-context", self._handle_reset_context)
+        router.add_post("/api/restart", self._handle_restart)
+        router.add_post("/api/shutdown", self._handle_shutdown)
         router.add_get("/api/events", self._handle_ws_events)
         # Web UI
         router.add_get("/", self._handle_index)
@@ -534,6 +536,42 @@ class KiwiAPI:
             kiwi_log("API", f"Error in /api/reset-context: {e}", level="ERROR")
             return _error_response(str(e), status=500)
 
+    async def _handle_restart(self, request: "web.Request") -> "web.Response":
+        """POST /api/restart - Restart the Kiwi service process."""
+        import sys
+        kiwi_log("API", "Restart requested via API", level="INFO")
+        try:
+            self._broadcast_event("SERVICE_RESTART", {"reason": "api"})
+            # Respond before restarting
+            resp = _json_response({"status": "restarting"})
+            # Schedule restart after response is sent
+            def _do_restart():
+                time.sleep(0.5)
+                os.execv(sys.executable, [sys.executable, "-m", "kiwi"])
+            threading.Thread(target=_do_restart, daemon=True).start()
+            return resp
+        except Exception as e:
+            kiwi_log("API", f"Error in /api/restart: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_shutdown(self, request: "web.Request") -> "web.Response":
+        """POST /api/shutdown - Shut down the Kiwi service."""
+        import sys
+        kiwi_log("API", "Shutdown requested via API", level="INFO")
+        try:
+            self._broadcast_event("SERVICE_SHUTDOWN", {"reason": "api"})
+            resp = _json_response({"status": "shutting_down"})
+            def _do_shutdown():
+                time.sleep(0.5)
+                if hasattr(self.service, "is_running"):
+                    self.service.is_running = False
+                os._exit(0)
+            threading.Thread(target=_do_shutdown, daemon=True).start()
+            return resp
+        except Exception as e:
+            kiwi_log("API", f"Error in /api/shutdown: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
     async def _handle_get_souls(self, request: "web.Request") -> "web.Response":
         """GET /api/souls - List all available souls."""
         try:
@@ -584,8 +622,11 @@ class KiwiAPI:
         if not success:
             return _error_response(f"Soul '{soul_id}' not found", status=404)
 
-        # Reset system prompt so next message uses new soul
+        # Reset system prompt and switch OpenClaw session if needed
         self.service._system_prompt_sent = False
+        openclaw = getattr(self.service, "openclaw", None)
+        if openclaw and hasattr(openclaw, "switch_session"):
+            openclaw.switch_session(sm.get_session_override())
 
         soul = sm.get_active_soul()
         kiwi_log("API", f"Soul switched to: {soul_id} ({soul.name})", level="INFO")

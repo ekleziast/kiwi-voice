@@ -615,7 +615,7 @@ class KiwiListener:
         if UNIFIED_VAD_AVAILABLE:
             try:
                 self._unified_vad = UnifiedVAD(
-                    sample_rate=self.config.sample_rate,
+                    sample_rate=self.config.input_sample_rate,
                     silero_threshold=0.4,
                     energy_threshold_multiplier=self.config.noise_threshold_multiplier,
                     energy_min_threshold=self.config.min_speech_volume,

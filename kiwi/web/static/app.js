@@ -255,6 +255,64 @@ async function resetContext() {
 }
 
 /**
+ * Restart the Kiwi service via POST /api/restart
+ */
+async function restartService() {
+    if (!confirm('Restart Kiwi Voice service?')) return;
+    try {
+        const resp = await fetch(`${API_BASE}/restart`, { method: 'POST' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        showToast('Restarting...', 'success');
+        addEventLogEntry('SYSTEM', 'Restart requested', 'system');
+        // Poll until service comes back
+        setTimeout(() => { pollUntilReady(); }, 3000);
+    } catch (err) {
+        showToast(`Restart failed: ${err.message}`, 'error');
+    }
+}
+
+/**
+ * Shutdown the Kiwi service via POST /api/shutdown
+ */
+async function shutdownService() {
+    if (!confirm('Shut down Kiwi Voice service? You will need to start it manually.')) return;
+    try {
+        const resp = await fetch(`${API_BASE}/shutdown`, { method: 'POST' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        showToast('Shutting down...', 'info');
+        addEventLogEntry('SYSTEM', 'Shutdown requested', 'system');
+        apiAvailable = false;
+    } catch (err) {
+        showToast(`Shutdown failed: ${err.message}`, 'error');
+    }
+}
+
+/**
+ * Poll the API until it responds (used after restart).
+ */
+function pollUntilReady(attempts) {
+    attempts = attempts || 0;
+    if (attempts > 20) {
+        showToast('Service did not come back', 'error');
+        return;
+    }
+    fetch(`${API_BASE}/status`)
+        .then(function(r) {
+            if (r.ok) {
+                showToast('Service restarted', 'success');
+                fetchStatus();
+                fetchSouls();
+                fetchSpeakers();
+            } else {
+                setTimeout(function() { pollUntilReady(attempts + 1); }, 1500);
+            }
+        })
+        .catch(function() {
+            setTimeout(function() { pollUntilReady(attempts + 1); }, 1500);
+        });
+}
+
+/**
  * Block a speaker via POST /api/speakers/:id/block
  */
 async function blockSpeaker(id) {

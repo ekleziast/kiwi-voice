@@ -335,9 +335,13 @@ class KiwiServiceOpenClaw(
         try:
             from kiwi.soul_manager import SoulManager
             self._soul_manager = SoulManager()
+            session_overrides = {}
+            if self.config.soul_nsfw_session:
+                session_overrides["nsfw"] = self.config.soul_nsfw_session
             self._soul_manager.configure(
                 default_soul=self.config.soul_default,
                 model_overrides={"nsfw": self.config.soul_nsfw_model},
+                session_overrides=session_overrides,
                 nsfw_souls=["nsfw"],
             )
             kiwi_log("KIWI", f"Soul manager initialized, default: {self.config.soul_default}", level="INFO")

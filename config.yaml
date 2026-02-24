@@ -218,6 +218,7 @@ souls:
   default: "mindful-companion"
   nsfw:
     model: "openrouter/mistralai/mistral-7b-instruct"
+    session: "kiwi-nsfw"  # OpenClaw agent with mistral-7b-instruct
 
 # ---------------------------------------------------------------------------
 # REST API Server
