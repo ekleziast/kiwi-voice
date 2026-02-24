@@ -123,6 +123,9 @@ class OpenClawWebSocket:
         self._last_send_time = 0.0
         self._pending_text = ""
 
+        # Last user-friendly tool error (for fallback when abort has no text)
+        self._last_tool_error = ""
+
         # Ответ, полученный через WebSocket
         self._full_response = ""
         self._response_event = threading.Event()
@@ -801,6 +804,75 @@ class OpenClawWebSocket:
 
         return "Продолжаю работу над задачей."
 
+    def _classify_tool_error(self, data: dict) -> str:
+        """Extract user-friendly Russian message from a tool error event."""
+        tool_name = self._extract_tool_name(data).lower()
+        error_code = str(
+            data.get("errorCode", data.get("error_code", ""))
+        ).strip().upper()
+        # Collect all possible error text fields
+        err_candidates = [
+            data.get("errorMessage"), data.get("error_message"),
+            data.get("error"), data.get("message"), data.get("reason"),
+        ]
+        result = data.get("result")
+        if isinstance(result, dict):
+            err_candidates.extend([
+                result.get("errorMessage"), result.get("error"),
+                result.get("message"),
+            ])
+            if not error_code:
+                error_code = str(result.get("errorCode", result.get("code", ""))).strip().upper()
+        error_text = ""
+        for c in err_candidates:
+            if isinstance(c, str) and c.strip():
+                error_text = c.strip()
+                break
+        error_lower = error_text.lower()
+
+        # Browser extension not connected
+        if (
+            "browser" in tool_name
+            or "browser" in error_lower
+        ) and (
+            "no tab is connected" in error_lower
+            or "extension" in error_lower
+            or error_code == "UNAVAILABLE"
+        ):
+            return (
+                "Расширение OpenClaw в браузере не подключено. "
+                "Нужно открыть расширение на активной вкладке."
+            )
+
+        # Generic UNAVAILABLE
+        if error_code == "UNAVAILABLE":
+            friendly_name = tool_name or "сервис"
+            return f"Инструмент {friendly_name} сейчас недоступен."
+
+        return ""
+
+    def _user_friendly_error(self, error_msg: str) -> str:
+        """Translate known errorMessage patterns to user-friendly Russian."""
+        lower = error_msg.lower()
+
+        if ("no tab is connected" in lower or "extension" in lower) and "browser" in lower:
+            return (
+                "Расширение OpenClaw в браузере не подключено. "
+                "Нужно открыть расширение на активной вкладке."
+            )
+
+        if "timeout" in lower or "timed out" in lower:
+            return "Запрос занял слишком много времени. Повтори, пожалуйста."
+
+        if "rate limit" in lower or "too many requests" in lower:
+            return "Слишком много запросов. Подожди немного и повтори."
+
+        if "unauthorized" in lower or "authentication" in lower or "forbidden" in lower:
+            return "Ошибка авторизации. Проверь настройки подключения."
+
+        # Fallback: wrap the raw message
+        return f"Ошибка: {error_msg}"
+
     def _handle_agent_event(self, payload: dict):
         """Преобразует native agent stream events в chat-like события для единого пайплайна."""
         run_id = payload.get("runId", "")
@@ -923,6 +995,15 @@ class OpenClawWebSocket:
             # Agent is calling a tool — cancel any pending deferred final
             # (multi-wave response continues with tool invocation).
             self._cancel_deferred_final()
+
+            # Detect known tool errors and save user-friendly message
+            # so that a subsequent abort has something meaningful to say.
+            phase = str(data.get("phase", data.get("status", data.get("state", "")))).lower()
+            if phase in ("error", "failed", "fail"):
+                friendly = self._classify_tool_error(data)
+                if friendly:
+                    self._last_tool_error = friendly
+                    self._log_ws(f"Tool error classified: {friendly}", "INFO")
 
             # Обновляем watchdog — tool вызовы означают, что LLM работает,
             # даже если текстовых токенов ещё нет.
@@ -1201,10 +1282,10 @@ class OpenClawWebSocket:
             self._is_streaming = False
             self._is_processing = False
 
-            # Сохраняем ошибку как ответ
+            # Сохраняем ошибку как ответ (переводим в понятное сообщение)
             with self._buffer_lock:
                 if not self._full_response:
-                    self._full_response = f"Ошибка: {error_msg}"
+                    self._full_response = self._user_friendly_error(error_msg)
 
             # Notify streaming completion so service.py stops TTS manager
             if self._callback_mode == "streaming" and self.on_complete:
@@ -1224,6 +1305,13 @@ class OpenClawWebSocket:
                 self._cancel_initiated = False
                 self._log_ws("Suppressing on_complete for local cancel", "DEBUG")
             elif self._callback_mode == "streaming" and self.on_complete:
+                # Provide a meaningful message when abort has no accumulated text
+                with self._buffer_lock:
+                    if not self._full_response:
+                        if self._last_tool_error:
+                            self._full_response = self._last_tool_error
+                        else:
+                            self._full_response = "Запрос был прерван. Повтори, пожалуйста."
                 self.on_complete(self._full_response)
 
             self._response_event.set()
@@ -1419,6 +1507,7 @@ class OpenClawWebSocket:
         # Сбрасываем состояние стриминга перед новым запросом
         self._cancel_deferred_final()  # new request overrides any pending final
         self._cancel_initiated = False  # new request clears stale cancel flag
+        self._last_tool_error = ""     # clear stale tool errors
         acquired = self._buffer_lock.acquire(timeout=3.0)
         if acquired:
             try:

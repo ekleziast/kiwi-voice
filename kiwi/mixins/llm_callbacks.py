@@ -118,6 +118,9 @@ class LLMCallbacksMixin:
                 full_text = accumulated
             else:
                 kiwi_log("LLM", "Generation complete: 0 chars (EMPTY)", level="WARNING")
+                # Safety net: don't leave the user in silence
+                if not self._streaming_response_playback_started:
+                    full_text = "Не удалось получить ответ. Повтори, пожалуйста."
         else:
             kiwi_log("LLM", f"Generation complete: {len(full_text)} chars", level="INFO")
 
