@@ -51,6 +51,10 @@ class KiwiConfig:
     # Voice system prompt - set on first connection (populated from i18n if empty)
     voice_system_prompt: str = ""
 
+    # Soul system
+    soul_default: str = "mindful-companion"
+    soul_nsfw_model: str = "openrouter/mistralai/mistral-7b-instruct"
+
     # LLM settings
     llm_model: str = "openrouter/moonshotai/kimi-k2.5"
     llm_filter_timeout: int = 15
@@ -300,6 +304,14 @@ class KiwiConfig:
         if llm_cfg.get("voice_system_prompt"):
             config.voice_system_prompt = llm_cfg.get("voice_system_prompt")
 
+        # Souls configuration
+        souls_cfg = yaml_config.get("souls", {})
+        if souls_cfg:
+            config.soul_default = souls_cfg.get("default", config.soul_default)
+            nsfw_cfg = souls_cfg.get("nsfw", {})
+            if isinstance(nsfw_cfg, dict) and nsfw_cfg.get("model"):
+                config.soul_nsfw_model = nsfw_cfg.get("model", config.soul_nsfw_model)
+
         # WebSocket settings from YAML
         config.ws_enabled = ws_cfg.get("enabled", config.ws_enabled)
         config.ws_port = ws_cfg.get("port", config.ws_port)
@@ -327,6 +339,12 @@ class KiwiConfig:
             config.api_host = os.getenv("KIWI_API_HOST").strip()
         if os.getenv("KIWI_API_PORT"):
             config.api_port = int(os.getenv("KIWI_API_PORT"))
+
+        # Soul env var overrides
+        if os.getenv("KIWI_SOUL_DEFAULT"):
+            config.soul_default = os.getenv("KIWI_SOUL_DEFAULT").strip()
+        if os.getenv("KIWI_SOUL_NSFW_MODEL"):
+            config.soul_nsfw_model = os.getenv("KIWI_SOUL_NSFW_MODEL").strip()
 
         if os.getenv("KIWI_LANGUAGE"):
             config.language = os.getenv("KIWI_LANGUAGE").strip() or "ru"

@@ -128,6 +128,9 @@ class KiwiAPI:
         router.add_post("/api/speakers/{speaker_id}/unblock", self._handle_unblock_speaker)
         router.add_get("/api/languages", self._handle_get_languages)
         router.add_post("/api/language", self._handle_set_language)
+        router.add_get("/api/souls", self._handle_get_souls)
+        router.add_get("/api/soul/current", self._handle_get_current_soul)
+        router.add_post("/api/soul", self._handle_switch_soul)
         router.add_post("/api/tts/test", self._handle_tts_test)
         router.add_post("/api/stop", self._handle_stop)
         router.add_post("/api/reset-context", self._handle_reset_context)
@@ -213,6 +216,15 @@ class KiwiAPI:
                         "priority": ctx.priority.name if hasattr(ctx.priority, "name") else str(ctx.priority),
                     }
 
+
+            # Active soul
+            soul_mgr = getattr(self.service, "soul_manager", None)
+            active_soul = None
+            if soul_mgr:
+                soul = soul_mgr.get_active_soul()
+                if soul:
+                    active_soul = {"id": soul.id, "name": soul.name, "nsfw": soul.nsfw}
+
             data = {
                 "state": state,
                 "language": language,
@@ -222,6 +234,7 @@ class KiwiAPI:
                 "is_running": is_running,
                 "uptime_seconds": round(uptime, 1),
                 "active_speaker": active_speaker,
+                "active_soul": active_soul,
             }
             return _json_response(data)
         except Exception as e:
@@ -520,6 +533,93 @@ class KiwiAPI:
         except Exception as e:
             kiwi_log("API", f"Error in /api/reset-context: {e}", level="ERROR")
             return _error_response(str(e), status=500)
+
+    async def _handle_get_souls(self, request: "web.Request") -> "web.Response":
+        """GET /api/souls - List all available souls."""
+        try:
+            sm = getattr(self.service, "soul_manager", None)
+            if sm is None:
+                return _json_response({"souls": [], "note": "Soul manager not available"})
+            return _json_response(sm.get_soul_info())
+        except Exception as e:
+            kiwi_log("API", f"Error in /api/souls: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_get_current_soul(self, request: "web.Request") -> "web.Response":
+        """GET /api/soul/current - Get current active soul."""
+        try:
+            sm = getattr(self.service, "soul_manager", None)
+            if sm is None:
+                return _json_response({"active": None, "note": "Soul manager not available"})
+            soul = sm.get_active_soul()
+            if soul:
+                return _json_response({
+                    "id": soul.id,
+                    "name": soul.name,
+                    "description": soul.description,
+                    "nsfw": soul.nsfw,
+                    "model": soul.model,
+                })
+            return _json_response({"active": None})
+        except Exception as e:
+            kiwi_log("API", f"Error in /api/soul/current: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_switch_soul(self, request: "web.Request") -> "web.Response":
+        """POST /api/soul - Switch active soul. Body: {"soul": "storyteller"}"""
+        try:
+            body = await request.json()
+        except Exception:
+            return _error_response("Invalid JSON body")
+
+        soul_id = body.get("soul", "").strip()
+        if not soul_id:
+            return _error_response("'soul' field is required")
+
+        sm = getattr(self.service, "soul_manager", None)
+        if sm is None:
+            return _error_response("Soul manager not available", status=503)
+
+        success = sm.switch_soul(soul_id)
+        if not success:
+            return _error_response(f"Soul '{soul_id}' not found", status=404)
+
+        # Reset system prompt so next message uses new soul
+        self.service._system_prompt_sent = False
+
+        soul = sm.get_active_soul()
+        kiwi_log("API", f"Soul switched to: {soul_id} ({soul.name})", level="INFO")
+
+        # Broadcast soul change via WebSocket
+        self._broadcast_event("SOUL_CHANGED", {
+            "soul_id": soul_id,
+            "name": soul.name,
+            "nsfw": soul.nsfw,
+            "model": soul.model,
+        })
+
+        return _json_response({
+            "soul": soul_id,
+            "name": soul.name,
+            "nsfw": soul.nsfw,
+            "model": soul.model,
+        })
+
+    def _broadcast_event(self, event_type: str, payload: dict):
+        """Broadcast an event to all WebSocket clients."""
+        if not self._ws_clients or not self._loop:
+            return
+        msg = json.dumps({
+            "event": event_type,
+            "data": payload,
+            "timestamp": datetime.now().isoformat(),
+        }, ensure_ascii=False, default=str)
+        for ws_client in list(self._ws_clients):
+            try:
+                asyncio.run_coroutine_threadsafe(ws_client.send_str(msg), self._loop)
+            except Exception:
+                pass
+
 
     async def _handle_ws_events(self, request: "web.Request") -> "web.WebSocketResponse":
         """GET /api/events - WebSocket endpoint for real-time event streaming."""

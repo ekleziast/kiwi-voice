@@ -753,3 +753,89 @@ body {
         min-width: auto;
     }
 }
+
+/* ============================================================
+   Souls Grid
+   ============================================================ */
+
+.souls-card {
+    margin-bottom: 20px;
+}
+
+.souls-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.soul-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 14px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    cursor: default;
+}
+
+.soul-card:hover {
+    border-color: var(--accent-highlight);
+}
+
+.soul-active {
+    border-color: var(--accent-highlight);
+    box-shadow: 0 0 0 1px var(--accent-highlight);
+}
+
+.soul-nsfw {
+    border-color: var(--accent-danger);
+}
+
+.soul-nsfw.soul-active {
+    box-shadow: 0 0 0 1px var(--accent-danger);
+}
+
+.soul-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.soul-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+
+.soul-badge {
+    font-size: 0.65rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.active-badge {
+    background: var(--accent-highlight);
+    color: #fff;
+}
+
+.nsfw-badge {
+    background: var(--accent-danger);
+    color: #fff;
+}
+
+.soul-description {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin: 4px 0 8px;
+    line-height: 1.4;
+}
+
+.soul-model {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin: 0 0 8px;
+    font-family: var(--font-mono);
+}

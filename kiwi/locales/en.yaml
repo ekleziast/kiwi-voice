@@ -54,6 +54,11 @@ responses:
   approval_prompt_telegram: "Please confirm in Telegram."
   approval_prompt_register: "Register the owner's voice: Kiwi, I'm the owner."
   approval_request: "{owner}, {speaker} asks: {command}. {hint}"
+  soul_switched: "Switched to {name} mode!"
+  soul_not_found: "That mode doesn't exist. Ask me what's available."
+  nsfw_enabled: "NSFW mode enabled. Model switched."
+  soul_reset: "Back to default mode!"
+  soul_list: "Available modes: {names}. Currently active: {active}."
 
 # Status announcer fallback messages
 status:
@@ -437,6 +442,30 @@ commands:
     - "command"
     - "terminal"
     - "shell"
+  # Soul switching
+  soul_switch_patterns:
+    - "switch to"
+    - "change mode to"
+    - "enable mode"
+    - "change soul to"
+  nsfw_enable_patterns:
+    - "nsfw mode"
+    - "adult mode"
+    - "18 plus"
+    - "eighteen plus"
+  default_mode_patterns:
+    - "default mode"
+    - "normal mode"
+    - "standard mode"
+    - "disable nsfw"
+    - "turn off nsfw"
+    - "turn off adult"
+  soul_list_patterns:
+    - "what modes"
+    - "what souls"
+    - "list modes"
+    - "list souls"
+    - "available modes"
 
 # OpenClaw CLI error messages
 cli_errors:

@@ -1478,12 +1478,14 @@ class OpenClawWebSocket:
         message: str,
         context: Optional[str] = None,
         callback_mode: str = "streaming",
+        model_override: Optional[str] = None,
     ) -> bool:
         """Send a message via WebSocket using chat.send (protocol v3).
 
         Args:
             message: Message to send
             context: Optional context (appended to the message)
+            model_override: Optional model string for soul-specific LLM switching
 
         Returns:
             True if the request was sent successfully
@@ -1529,6 +1531,10 @@ class OpenClawWebSocket:
                 "idempotencyKey": idempotency_key,
                 "timeoutMs": self.config.openclaw_timeout * 1000
             }
+
+            # Model override (for soul-specific LLM switching)
+            if model_override:
+                chat_params["model"] = model_override
 
             frame = {
                 "type": "req",

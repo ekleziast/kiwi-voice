@@ -331,6 +331,20 @@ class KiwiServiceOpenClaw(
             except Exception as e:
                 kiwi_log("KIWI", f"Voice Security init failed: {e}", level="WARNING")
 
+        # Soul manager
+        try:
+            from kiwi.soul_manager import SoulManager
+            self._soul_manager = SoulManager()
+            self._soul_manager.configure(
+                default_soul=self.config.soul_default,
+                model_overrides={"nsfw": self.config.soul_nsfw_model},
+                nsfw_souls=["nsfw"],
+            )
+            kiwi_log("KIWI", f"Soul manager initialized, default: {self.config.soul_default}", level="INFO")
+        except Exception as e:
+            kiwi_log("KIWI", f"Soul manager not available: {e}", level="WARNING")
+            self._soul_manager = None
+
         # REST API server (started in start() if enabled)
         self._api = None
 
@@ -461,6 +475,11 @@ class KiwiServiceOpenClaw(
     def is_speaking(self) -> bool:
         """Return True if Kiwi is currently speaking."""
         return self._is_speaking or self._is_streaming or self._streaming_tts_manager is not None
+
+    @property
+    def soul_manager(self):
+        """Access the soul manager instance (or None if unavailable)."""
+        return self._soul_manager
 
     # === LIFECYCLE ===
 

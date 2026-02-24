@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     addEventLogEntry('SYSTEM', 'Dashboard initialized', 'system');
     fetchStatus();
     fetchLanguages();
+    fetchSouls();
     fetchSpeakers();
     connectWebSocket();
 
@@ -92,6 +93,78 @@ async function fetchSpeakers() {
         // Silently ignore on first load
     }
 }
+
+/**
+ * Fetch available souls from /api/souls
+ */
+async function fetchSouls() {
+    try {
+        const resp = await fetch(`${API_BASE}/souls`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        updateSoulsGrid(data);
+    } catch (err) {
+        // Silently ignore on first load
+    }
+}
+
+/**
+ * Update the souls grid UI from API response.
+ */
+function updateSoulsGrid(data) {
+    const grid = document.getElementById('souls-grid');
+    if (!grid) return;
+    const souls = data.souls || [];
+    const activeSoulId = data.active || '';
+
+    if (souls.length === 0) {
+        grid.innerHTML = '<p class="empty-state">No souls available</p>';
+        return;
+    }
+
+    grid.innerHTML = '';
+    for (const soul of souls) {
+        const card = document.createElement('div');
+        const isActive = soul.id === activeSoulId;
+        card.className = 'soul-card' + (isActive ? ' soul-active' : '') + (soul.nsfw ? ' soul-nsfw' : '');
+
+        let html = '<div class="soul-header">';
+        html += '<span class="soul-name">' + escapeHtml(soul.name) + '</span>';
+        if (soul.nsfw) html += '<span class="soul-badge nsfw-badge">18+</span>';
+        if (isActive) html += '<span class="soul-badge active-badge">Active</span>';
+        html += '</div>';
+        html += '<p class="soul-description">' + escapeHtml(soul.description || '') + '</p>';
+        if (soul.model) html += '<p class="soul-model">Model: ' + escapeHtml(soul.model) + '</p>';
+        if (!isActive) html += '<button class="btn btn-small btn-primary" onclick="switchSoul(&#39;' + escapeAttr(soul.id) + '&#39;)">Activate</button>';
+
+        card.innerHTML = html;
+        grid.appendChild(card);
+    }
+}
+
+/**
+ * Switch to a different soul via POST /api/soul
+ */
+async function switchSoul(soulId) {
+    try {
+        const resp = await fetch(`${API_BASE}/soul`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ soul: soulId })
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        showToast(`Switched to ${data.name}`, 'success');
+        addEventLogEntry('SOUL', `Switched to ${data.name}${data.nsfw ? ' (18+)' : ''}`, 'system');
+        fetchSouls();
+        fetchStatus();
+    } catch (err) {
+        showToast(`Failed to switch soul: ${err.message}`, 'error');
+        addEventLogEntry('ERROR', `Soul switch failed: ${err.message}`, 'error');
+    }
+}
+
+
 
 /**
  * Switch language via POST /api/language
@@ -362,9 +435,17 @@ function updateStatus(status) {
     const langEl = document.getElementById('current-language');
     langEl.textContent = status.language || '--';
 
+    // Active soul
+    if (status.active_soul) {
+        const soulEl = document.getElementById('status-soul');
+        if (soulEl) {
+            soulEl.textContent = status.active_soul.name + (status.active_soul.nsfw ? ' (18+)' : '');
+        }
+    }
+
     // Uptime
-    if (status.uptime !== undefined) {
-        startTime = Date.now() - (status.uptime * 1000);
+    if (status.uptime_seconds !== undefined) {
+        startTime = Date.now() - (status.uptime_seconds * 1000);
     }
 }
 
@@ -499,6 +580,11 @@ function updateStatusFromEvent(eventType, payload) {
         if (name) {
             document.getElementById('status-speaker').textContent = name;
         }
+    }
+
+    // Soul change events
+    if (upper.includes('SOUL_CHANGED')) {
+        fetchSouls();
     }
 }
 

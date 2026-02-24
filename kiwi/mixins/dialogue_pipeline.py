@@ -154,9 +154,63 @@ class DialoguePipelineMixin:
                 ctx.abort = True
 
     def _stage_handle_special_commands(self, ctx: CommandContext) -> None:
-        """Reset context, calibrate, voice profile commands."""
+        """Reset context, calibrate, voice profile, and soul switching commands."""
         calibrate_words = ['калибровка', 'калибруй', 'перекалибруй', 'обнови профиль']
         reset_prompt_words = ['сбрось контекст', 'новый разговор', 'забудь', 'сбрось системный промпт']
+
+        # Soul switching commands
+        if self._soul_manager:
+            command_lower = ctx.command_lower
+
+            # "switch to storyteller" / "переключись на рассказчика" etc.
+            soul_switch_patterns = t("commands.soul_switch_patterns")
+            if isinstance(soul_switch_patterns, list):
+                for pattern in soul_switch_patterns:
+                    if pattern in command_lower:
+                        # Extract soul name after the pattern
+                        rest = command_lower.split(pattern, 1)[-1].strip()
+                        if rest:
+                            soul_id = self._soul_manager.find_soul_by_name(rest)
+                            if soul_id:
+                                self._soul_manager.switch_soul(soul_id)
+                                self._system_prompt_sent = False  # Force re-send with new soul
+                                soul = self._soul_manager.get_soul(soul_id)
+                                self.speak(t("responses.soul_switched", name=soul.name), style="cheerful")
+                                ctx.abort = True
+                                return
+                            else:
+                                self.speak(t("responses.soul_not_found"), style="neutral")
+                                ctx.abort = True
+                                return
+
+            # "nsfw mode" / "режим 18+" / "adult mode"
+            nsfw_patterns = t("commands.nsfw_enable_patterns")
+            if isinstance(nsfw_patterns, list) and any(p in command_lower for p in nsfw_patterns):
+                self._soul_manager.switch_soul("nsfw")
+                self._system_prompt_sent = False
+                self.speak(t("responses.nsfw_enabled"), style="neutral")
+                ctx.abort = True
+                return
+
+            # "default mode" / "обычный режим" / "disable nsfw"
+            default_patterns = t("commands.default_mode_patterns")
+            if isinstance(default_patterns, list) and any(p in command_lower for p in default_patterns):
+                self._soul_manager.switch_to_default()
+                self._system_prompt_sent = False
+                self.speak(t("responses.soul_reset"), style="cheerful")
+                ctx.abort = True
+                return
+
+            # "what modes" / "какие режимы" / "list souls"
+            list_patterns = t("commands.soul_list_patterns")
+            if isinstance(list_patterns, list) and any(p in command_lower for p in list_patterns):
+                souls = self._soul_manager.list_souls()
+                names = ", ".join(s.name for s in souls if not s.nsfw)
+                active = self._soul_manager.get_active_soul()
+                active_name = active.name if active else "none"
+                self.speak(t("responses.soul_list", names=names, active=active_name), style="neutral")
+                ctx.abort = True
+                return
 
         if any(word in ctx.command_lower for word in reset_prompt_words):
             kiwi_log("KIWI", "Resetting system prompt...", level="INFO")
@@ -404,14 +458,24 @@ class DialoguePipelineMixin:
         self._start_streaming_runtime(ctx.command)
 
         if not self._system_prompt_sent:
-            kiwi_log("KIWI", "Sending first message with system prompt", level="INFO")
+            # Compose system prompt with active soul personality
+            if self._soul_manager:
+                system_prompt = self._soul_manager.get_system_prompt(self.config.voice_system_prompt)
+            else:
+                system_prompt = self.config.voice_system_prompt
+
+            model_override = self._soul_manager.get_model_override() if self._soul_manager else None
+
+            kiwi_log("KIWI", f"Sending first message with system prompt (soul: {self._soul_manager.active_soul_id if self._soul_manager else 'none'})", level="INFO")
             success = self.openclaw.send_message(
                 ctx.command,
-                context=self.config.voice_system_prompt
+                context=system_prompt,
+                model_override=model_override,
             )
             self._system_prompt_sent = True
         else:
-            success = self.openclaw.send_message(ctx.command)
+            model_override = self._soul_manager.get_model_override() if self._soul_manager else None
+            success = self.openclaw.send_message(ctx.command, model_override=model_override)
 
         if not success:
             kiwi_log("KIWI", "Failed to send message via WebSocket", level="ERROR")
@@ -438,9 +502,14 @@ class DialoguePipelineMixin:
             kiwi_log("KIWI", "Using classic blocking flow (CLI mode)", level="INFO")
 
         if not self._system_prompt_sent:
-            full_command = f"{self.config.voice_system_prompt}\n\n{ctx.command}"
+            # Compose system prompt with active soul personality
+            if self._soul_manager:
+                system_prompt = self._soul_manager.get_system_prompt(self.config.voice_system_prompt)
+            else:
+                system_prompt = self.config.voice_system_prompt
+            full_command = f"{system_prompt}\n\n{ctx.command}"
             self._system_prompt_sent = True
-            kiwi_log("KIWI", "System prompt added to first message", level="INFO")
+            kiwi_log("KIWI", f"System prompt added to first message (soul: {self._soul_manager.active_soul_id if self._soul_manager else 'none'})", level="INFO")
         else:
             full_command = ctx.command
 

@@ -54,6 +54,11 @@ responses:
   approval_prompt_telegram: "Подтвердите в Telegram."
   approval_prompt_register: "Зарегистрируйте голос владельца: Киви, я хозяин."
   approval_request: "{owner}, {speaker} просит: {command}. {hint}"
+  soul_switched: "Переключилась на режим {name}!"
+  soul_not_found: "Такого режима нет. Спроси какие есть."
+  nsfw_enabled: "Режим 18 плюс включён. Модель переключена."
+  soul_reset: "Вернулась в обычный режим!"
+  soul_list: "Доступные режимы: {names}. Сейчас активен: {active}."
 
 # Status announcer fallback messages
 status:
@@ -468,6 +473,30 @@ commands:
     - "команд"
     - "в терминале"
     - "shell"
+  # Soul switching
+  soul_switch_patterns:
+    - "переключись на"
+    - "режим"
+    - "включи режим"
+    - "смени душу на"
+    - "переключи на"
+  nsfw_enable_patterns:
+    - "режим 18"
+    - "режим для взрослых"
+    - "взрослый режим"
+    - "nsfw"
+  default_mode_patterns:
+    - "обычный режим"
+    - "стандартный режим"
+    - "режим по умолчанию"
+    - "выключи 18"
+    - "выключи nsfw"
+    - "отключи 18"
+  soul_list_patterns:
+    - "какие режимы"
+    - "какие души"
+    - "список режимов"
+    - "какие личности"
 
 # OpenClaw CLI error messages
 cli_errors:
