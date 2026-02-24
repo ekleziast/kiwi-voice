@@ -1,0 +1,627 @@
+"""REST API server for Kiwi Voice.
+
+Provides HTTP endpoints for configuration, status, speaker management,
+and a WebSocket endpoint for real-time event streaming.
+Runs in a background thread within the main Kiwi service.
+"""
+
+import asyncio
+import json
+import os
+import threading
+import time
+from datetime import datetime
+from typing import Optional, Any
+
+from kiwi import PROJECT_ROOT
+from kiwi.utils import kiwi_log
+
+try:
+    from aiohttp import web
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
+    kiwi_log("API", "aiohttp not available, REST API disabled", level="WARNING")
+
+try:
+    from kiwi.event_bus import EventBus, EventType, get_event_bus
+    EVENT_BUS_AVAILABLE = True
+except ImportError:
+    EVENT_BUS_AVAILABLE = False
+
+try:
+    from kiwi.speaker_manager import SpeakerManager, VoicePriority
+    SPEAKER_MANAGER_AVAILABLE = True
+except ImportError:
+    SPEAKER_MANAGER_AVAILABLE = False
+
+
+def _json_response(data: Any, status: int = 200) -> "web.Response":
+    """Create a JSON response with proper content type."""
+    return web.Response(
+        text=json.dumps(data, ensure_ascii=False, default=str),
+        status=status,
+        content_type="application/json",
+    )
+
+
+def _error_response(message: str, status: int = 400) -> "web.Response":
+    """Create a JSON error response."""
+    return _json_response({"error": message}, status=status)
+
+
+class KiwiAPI:
+    """HTTP API server for Kiwi Voice."""
+
+    def __init__(self, service: Any, host: str = "0.0.0.0", port: int = 7789):
+        """
+        Args:
+            service: KiwiServiceOpenClaw instance (provides access to config, state, speakers, etc.)
+            host: Bind address
+            port: Bind port
+        """
+        if not AIOHTTP_AVAILABLE:
+            raise RuntimeError("aiohttp is required for the REST API server")
+
+        self.service = service
+        self.host = host
+        self.port = port
+        self._app: Optional[web.Application] = None
+        self._runner: Optional[web.AppRunner] = None
+        self._thread: Optional[threading.Thread] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._ws_clients: list = []  # Active WebSocket connections
+        self._start_time: float = time.time()
+        self._event_sub_ids: list = []  # EventBus subscription IDs
+
+    def start(self):
+        """Start the API server in a background thread."""
+        self._thread = threading.Thread(target=self._run, daemon=True, name="kiwi-api")
+        self._thread.start()
+        kiwi_log("API", f"Server starting on http://{self.host}:{self.port}", level="INFO")
+
+    def stop(self):
+        """Stop the API server."""
+        # Unsubscribe from EventBus
+        self._event_sub_ids.clear()
+
+        if self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._loop.stop)
+        kiwi_log("API", "Server stopped", level="INFO")
+
+    def _run(self):
+        """Background thread entry point."""
+        try:
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+            self._loop.run_until_complete(self._start_server())
+            self._loop.run_forever()
+        except Exception as e:
+            kiwi_log("API", f"Server thread error: {e}", level="ERROR")
+        finally:
+            try:
+                if self._runner:
+                    self._loop.run_until_complete(self._runner.cleanup())
+            except Exception:
+                pass
+
+    async def _start_server(self):
+        """Initialize and start the aiohttp application."""
+        self._app = web.Application()
+        self._setup_routes()
+        self._setup_event_forwarding()
+        self._runner = web.AppRunner(self._app)
+        await self._runner.setup()
+        site = web.TCPSite(self._runner, self.host, self.port)
+        await site.start()
+        kiwi_log("API", f"Server listening on http://{self.host}:{self.port}", level="INFO")
+
+    def _setup_routes(self):
+        """Register all API routes."""
+        router = self._app.router
+        router.add_get("/api/status", self._handle_status)
+        router.add_get("/api/config", self._handle_get_config)
+        router.add_patch("/api/config", self._handle_update_config)
+        router.add_get("/api/speakers", self._handle_get_speakers)
+        router.add_delete("/api/speakers/{speaker_id}", self._handle_delete_speaker)
+        router.add_post("/api/speakers/{speaker_id}/block", self._handle_block_speaker)
+        router.add_post("/api/speakers/{speaker_id}/unblock", self._handle_unblock_speaker)
+        router.add_get("/api/languages", self._handle_get_languages)
+        router.add_post("/api/language", self._handle_set_language)
+        router.add_post("/api/tts/test", self._handle_tts_test)
+        router.add_post("/api/stop", self._handle_stop)
+        router.add_post("/api/reset-context", self._handle_reset_context)
+        router.add_get("/api/events", self._handle_ws_events)
+        # Web UI
+        router.add_get("/", self._handle_index)
+        web_static_dir = os.path.join(PROJECT_ROOT, "kiwi", "web", "static")
+        if os.path.isdir(web_static_dir):
+            router.add_static("/static", web_static_dir, show_index=False)
+
+    def _setup_event_forwarding(self):
+        """Subscribe to EventBus events and forward them to WebSocket clients."""
+        if not EVENT_BUS_AVAILABLE:
+            return
+
+        bus = get_event_bus()
+        for event_type in EventType:
+            sub_id = bus.subscribe(
+                event_type,
+                self._on_event_bus_event,
+                priority=-10,  # Low priority, non-blocking
+                async_mode=True,
+            )
+            self._event_sub_ids.append(sub_id)
+
+    def _on_event_bus_event(self, event):
+        """Forward an EventBus event to all connected WebSocket clients."""
+        if not self._ws_clients or not self._loop:
+            return
+
+        msg = json.dumps(
+            {
+                "event": event.type.name,
+                "data": event.payload,
+                "timestamp": datetime.fromtimestamp(event.timestamp).isoformat(),
+                "source": event.source,
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+
+        # Schedule sends on the API event loop
+        for ws in list(self._ws_clients):
+            try:
+                asyncio.run_coroutine_threadsafe(ws.send_str(msg), self._loop)
+            except Exception:
+                pass  # Client may have disconnected
+
+    # ------------------------------------------------------------------
+    # Helpers to safely access service attributes
+    # ------------------------------------------------------------------
+
+    def _get_speaker_manager(self) -> Optional["SpeakerManager"]:
+        """Return the SpeakerManager from the listener, if available."""
+        listener = getattr(self.service, "listener", None)
+        if listener is None:
+            return None
+        return getattr(listener, "speaker_manager", None)
+
+    # ------------------------------------------------------------------
+    # Route handlers
+    # ------------------------------------------------------------------
+
+    async def _handle_status(self, request: "web.Request") -> "web.Response":
+        """GET /api/status - Return current service state."""
+        try:
+            state = self.service._get_state() if hasattr(self.service, "_get_state") else "unknown"
+            language = getattr(self.service.config, "language", "ru")
+            tts_provider = getattr(self.service, "tts_provider", "unknown")
+            is_speaking = getattr(self.service, "_is_speaking", False)
+            is_streaming = getattr(self.service, "_is_streaming", False)
+            is_running = getattr(self.service, "is_running", False)
+            uptime = time.time() - self._start_time
+
+            active_speaker = None
+            sm = self._get_speaker_manager()
+            if sm and hasattr(sm, "voice_context"):
+                ctx = sm.voice_context
+                if ctx.is_valid():
+                    active_speaker = {
+                        "id": ctx.speaker_id,
+                        "name": ctx.speaker_name,
+                        "priority": ctx.priority.name if hasattr(ctx.priority, "name") else str(ctx.priority),
+                    }
+
+            data = {
+                "state": state,
+                "language": language,
+                "tts_provider": tts_provider,
+                "is_speaking": is_speaking or is_streaming,
+                "is_processing": state in ("processing", "thinking"),
+                "is_running": is_running,
+                "uptime_seconds": round(uptime, 1),
+                "active_speaker": active_speaker,
+            }
+            return _json_response(data)
+        except Exception as e:
+            kiwi_log("API", f"Error in /api/status: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_get_config(self, request: "web.Request") -> "web.Response":
+        """GET /api/config - Return current config (safe fields only, no secrets)."""
+        try:
+            cfg = self.service.config
+            data = {
+                "language": cfg.language,
+                "tts_provider": cfg.tts_provider,
+                "tts_qwen_backend": cfg.tts_qwen_backend,
+                "tts_voice": cfg.tts_voice,
+                "tts_model_size": cfg.tts_model_size,
+                "tts_default_style": cfg.tts_default_style,
+                "stt_model": cfg.stt_model,
+                "stt_device": cfg.stt_device,
+                "stt_compute_type": cfg.stt_compute_type,
+                "stt_language": cfg.stt_language,
+                "wake_word": cfg.wake_word_keyword,
+                "wake_word_position_limit": cfg.wake_word_position_limit,
+                "ws_enabled": cfg.ws_enabled,
+                "ws_host": cfg.ws_host,
+                "ws_port": cfg.ws_port,
+                "sample_rate": cfg.sample_rate,
+                "llm_model": cfg.llm_model,
+                "api_host": cfg.api_host,
+                "api_port": cfg.api_port,
+            }
+            return _json_response(data)
+        except Exception as e:
+            kiwi_log("API", f"Error in /api/config: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_update_config(self, request: "web.Request") -> "web.Response":
+        """PATCH /api/config - Update config fields at runtime (safe fields only)."""
+        SAFE_FIELDS = {
+            "language": str,
+            "wake_word": str,
+            "tts_default_style": str,
+        }
+        try:
+            body = await request.json()
+        except Exception:
+            return _error_response("Invalid JSON body")
+
+        if not isinstance(body, dict):
+            return _error_response("Request body must be a JSON object")
+
+        updated = {}
+        cfg = self.service.config
+        for key, value in body.items():
+            if key not in SAFE_FIELDS:
+                return _error_response(f"Field '{key}' is not updatable at runtime")
+            expected_type = SAFE_FIELDS[key]
+            try:
+                value = expected_type(value)
+            except (TypeError, ValueError):
+                return _error_response(f"Invalid type for '{key}', expected {expected_type.__name__}")
+
+            if key == "language":
+                cfg.language = value
+                # Re-initialize i18n with new language
+                try:
+                    from kiwi.i18n import setup as i18n_setup
+                    i18n_setup(value)
+                except Exception as e:
+                    kiwi_log("API", f"Failed to switch language: {e}", level="ERROR")
+            elif key == "wake_word":
+                cfg.wake_word_keyword = value
+            elif key == "tts_default_style":
+                cfg.tts_default_style = value
+
+            updated[key] = value
+            kiwi_log("API", f"Config updated: {key} = {value}", level="INFO")
+
+        return _json_response({"updated": updated})
+
+    async def _handle_get_speakers(self, request: "web.Request") -> "web.Response":
+        """GET /api/speakers - List all known speaker profiles."""
+        try:
+            sm = self._get_speaker_manager()
+            if sm is None:
+                return _json_response({"speakers": [], "note": "Speaker manager not available"})
+
+            speakers = []
+            profile_info = sm.get_profile_info()
+            for pid, info in profile_info.items():
+                speakers.append({
+                    "id": pid,
+                    "name": info.get("name", pid),
+                    "priority": info.get("priority", "guest"),
+                    "is_blocked": info.get("is_blocked", False),
+                    "auto_learned": info.get("auto_learned", False),
+                    "sample_count": info.get("samples", 0),
+                    "last_seen": info.get("last_seen", ""),
+                })
+            return _json_response({"speakers": speakers})
+        except Exception as e:
+            kiwi_log("API", f"Error in /api/speakers: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_delete_speaker(self, request: "web.Request") -> "web.Response":
+        """DELETE /api/speakers/{speaker_id} - Remove a speaker profile."""
+        speaker_id = request.match_info["speaker_id"]
+        try:
+            sm = self._get_speaker_manager()
+            if sm is None:
+                return _error_response("Speaker manager not available", status=503)
+
+            if speaker_id == sm.OWNER_ID:
+                return _error_response("Cannot delete owner profile", status=403)
+
+            if speaker_id not in sm.profiles:
+                return _error_response(f"Speaker '{speaker_id}' not found", status=404)
+
+            del sm.profiles[speaker_id]
+            sm._save_extended_profiles()
+
+            # Remove from base identifier if available
+            if sm.base_identifier and speaker_id in getattr(sm.base_identifier, "profiles", {}):
+                del sm.base_identifier.profiles[speaker_id]
+                sm.base_identifier.save_profiles()
+
+            # Remove from hot cache
+            with sm._hot_cache_lock:
+                sm._hot_cache.pop(speaker_id, None)
+
+            kiwi_log("API", f"Speaker profile deleted: {speaker_id}", level="INFO")
+            return _json_response({"deleted": speaker_id})
+        except Exception as e:
+            kiwi_log("API", f"Error deleting speaker: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_block_speaker(self, request: "web.Request") -> "web.Response":
+        """POST /api/speakers/{speaker_id}/block - Block a speaker."""
+        speaker_id = request.match_info["speaker_id"]
+        try:
+            sm = self._get_speaker_manager()
+            if sm is None:
+                return _error_response("Speaker manager not available", status=503)
+
+            success = sm.block_speaker(speaker_id)
+            if success:
+                return _json_response({"blocked": speaker_id})
+            else:
+                return _error_response(f"Cannot block '{speaker_id}'", status=400)
+        except Exception as e:
+            kiwi_log("API", f"Error blocking speaker: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_unblock_speaker(self, request: "web.Request") -> "web.Response":
+        """POST /api/speakers/{speaker_id}/unblock - Unblock a speaker."""
+        speaker_id = request.match_info["speaker_id"]
+        try:
+            sm = self._get_speaker_manager()
+            if sm is None:
+                return _error_response("Speaker manager not available", status=503)
+
+            success = sm.unblock_speaker(speaker_id)
+            if success:
+                return _json_response({"unblocked": speaker_id})
+            else:
+                return _error_response(f"Speaker '{speaker_id}' not found", status=404)
+        except Exception as e:
+            kiwi_log("API", f"Error unblocking speaker: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_get_languages(self, request: "web.Request") -> "web.Response":
+        """GET /api/languages - List available languages."""
+        try:
+            locales_dir = os.path.join(PROJECT_ROOT, "kiwi", "locales")
+            available = []
+            if os.path.isdir(locales_dir):
+                for fname in sorted(os.listdir(locales_dir)):
+                    if fname.endswith(".yaml") and not fname.startswith("_"):
+                        lang_code = fname[:-5]  # strip .yaml
+                        available.append(lang_code)
+
+            current = getattr(self.service.config, "language", "ru")
+            return _json_response({"current": current, "available": available})
+        except Exception as e:
+            kiwi_log("API", f"Error in /api/languages: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_set_language(self, request: "web.Request") -> "web.Response":
+        """POST /api/language - Switch language."""
+        try:
+            body = await request.json()
+        except Exception:
+            return _error_response("Invalid JSON body")
+
+        language = body.get("language")
+        if not language or not isinstance(language, str):
+            return _error_response("'language' field is required (string)")
+
+        language = language.strip().lower()
+
+        # Verify locale file exists
+        locale_path = os.path.join(PROJECT_ROOT, "kiwi", "locales", f"{language}.yaml")
+        if not os.path.exists(locale_path):
+            return _error_response(f"Language '{language}' not available", status=404)
+
+        try:
+            from kiwi.i18n import setup as i18n_setup
+            i18n_setup(language)
+            self.service.config.language = language
+            kiwi_log("API", f"Language switched to: {language}", level="INFO")
+            return _json_response({"language": language})
+        except Exception as e:
+            kiwi_log("API", f"Failed to switch language: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_tts_test(self, request: "web.Request") -> "web.Response":
+        """POST /api/tts/test - Speak a test phrase."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        text = body.get("text", "").strip() if isinstance(body, dict) else ""
+        if not text:
+            try:
+                from kiwi.i18n import t
+                text = t("responses.greeting")
+                if text == "responses.greeting":
+                    text = "Hello! I am Kiwi, your voice assistant."
+            except Exception:
+                text = "Hello! I am Kiwi, your voice assistant."
+
+        try:
+            speak_func = getattr(self.service, "speak", None)
+            if speak_func is None:
+                return _error_response("TTS not available on this service", status=503)
+
+            # Run speak in a background thread to avoid blocking the API
+            threading.Thread(
+                target=speak_func,
+                args=(text,),
+                kwargs={"style": "cheerful", "allow_barge_in": True},
+                daemon=True,
+                name="api-tts-test",
+            ).start()
+
+            return _json_response({"status": "speaking", "text": text})
+        except Exception as e:
+            kiwi_log("API", f"Error in TTS test: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_stop(self, request: "web.Request") -> "web.Response":
+        """POST /api/stop - Stop current TTS/processing."""
+        try:
+            # Request barge-in to stop current TTS
+            if hasattr(self.service, "request_barge_in"):
+                self.service.request_barge_in()
+
+            # Cancel streaming TTS
+            streaming_mgr = getattr(self.service, "_streaming_tts_manager", None)
+            if streaming_mgr:
+                try:
+                    streaming_mgr.stop(graceful=False)
+                except Exception:
+                    pass
+
+            # Set streaming stop event
+            stop_event = getattr(self.service, "_streaming_stop_event", None)
+            if stop_event:
+                stop_event.set()
+
+            kiwi_log("API", "Stop requested via API", level="INFO")
+            return _json_response({"status": "stopped"})
+        except Exception as e:
+            kiwi_log("API", f"Error in /api/stop: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_reset_context(self, request: "web.Request") -> "web.Response":
+        """POST /api/reset-context - Reset conversation context."""
+        try:
+            # Reset OpenClaw session
+            openclaw = getattr(self.service, "openclaw", None)
+            if openclaw and hasattr(openclaw, "reset_context"):
+                openclaw.reset_context()
+
+            # Reset speaker context
+            sm = self._get_speaker_manager()
+            if sm and hasattr(sm, "voice_context"):
+                sm.voice_context.clear()
+
+            # Mark system prompt as not sent so it will be re-sent
+            self.service._system_prompt_sent = False
+
+            kiwi_log("API", "Context reset via API", level="INFO")
+            return _json_response({"status": "context_reset"})
+        except Exception as e:
+            kiwi_log("API", f"Error in /api/reset-context: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_ws_events(self, request: "web.Request") -> "web.WebSocketResponse":
+        """GET /api/events - WebSocket endpoint for real-time event streaming."""
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        self._ws_clients.append(ws)
+        kiwi_log("API", f"WebSocket client connected (total: {len(self._ws_clients)})", level="INFO")
+
+        try:
+            # Send initial status
+            state = self.service._get_state() if hasattr(self.service, "_get_state") else "unknown"
+            await ws.send_json({
+                "event": "CONNECTED",
+                "data": {"state": state},
+                "timestamp": datetime.now().isoformat(),
+            })
+
+            # Keep connection alive and listen for client messages
+            async for msg in ws:
+                if msg.type == web.WSMsgType.TEXT:
+                    # Client can send ping or commands
+                    try:
+                        client_msg = json.loads(msg.data)
+                        if client_msg.get("type") == "ping":
+                            await ws.send_json({"event": "pong", "timestamp": datetime.now().isoformat()})
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                elif msg.type == web.WSMsgType.ERROR:
+                    kiwi_log("API", f"WebSocket error: {ws.exception()}", level="ERROR")
+                    break
+        except Exception as e:
+            kiwi_log("API", f"WebSocket handler error: {e}", level="ERROR")
+        finally:
+            self._ws_clients.remove(ws)
+            kiwi_log("API", f"WebSocket client disconnected (remaining: {len(self._ws_clients)})", level="INFO")
+
+        return ws
+
+    async def _handle_index(self, request: "web.Request") -> "web.Response":
+        """GET / - Serve the Web UI index page."""
+        index_path = os.path.join(PROJECT_ROOT, "kiwi", "web", "index.html")
+        if os.path.exists(index_path):
+            return web.FileResponse(index_path)
+
+        # If no web UI exists, return a minimal status page
+        html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kiwi Voice</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+               max-width: 600px; margin: 40px auto; padding: 20px;
+               background: #1a1a2e; color: #eee; }
+        h1 { color: #7bed9f; }
+        .status { background: #16213e; padding: 15px; border-radius: 8px; margin: 10px 0; }
+        .endpoint { font-family: monospace; color: #74b9ff; }
+        a { color: #74b9ff; }
+    </style>
+</head>
+<body>
+    <h1>Kiwi Voice API</h1>
+    <div class="status" id="status">Loading...</div>
+    <h2>Endpoints</h2>
+    <ul>
+        <li><span class="endpoint">GET /api/status</span> - Service status</li>
+        <li><span class="endpoint">GET /api/config</span> - Current configuration</li>
+        <li><span class="endpoint">PATCH /api/config</span> - Update configuration</li>
+        <li><span class="endpoint">GET /api/speakers</span> - Speaker profiles</li>
+        <li><span class="endpoint">GET /api/languages</span> - Available languages</li>
+        <li><span class="endpoint">POST /api/language</span> - Switch language</li>
+        <li><span class="endpoint">POST /api/tts/test</span> - Test TTS</li>
+        <li><span class="endpoint">POST /api/stop</span> - Stop playback</li>
+        <li><span class="endpoint">POST /api/reset-context</span> - Reset context</li>
+        <li><span class="endpoint">GET /api/events</span> - WebSocket events</li>
+    </ul>
+    <script>
+        fetch('/api/status')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('status').innerHTML =
+                    '<b>State:</b> ' + data.state +
+                    ' | <b>Language:</b> ' + data.language +
+                    ' | <b>TTS:</b> ' + data.tts_provider +
+                    ' | <b>Uptime:</b> ' + Math.round(data.uptime_seconds) + 's';
+            })
+            .catch(() => {
+                document.getElementById('status').textContent = 'Failed to fetch status';
+            });
+    </script>
+</body>
+</html>"""
+        return web.Response(text=html, content_type="text/html")
+
+
+def create_api(service: Any, host: str = "0.0.0.0", port: int = 7789) -> Optional[KiwiAPI]:
+    """Factory function to create and return a KiwiAPI instance.
+
+    Returns None if aiohttp is not available.
+    """
+    if not AIOHTTP_AVAILABLE:
+        kiwi_log("API", "Cannot create API server: aiohttp not installed", level="WARNING")
+        return None
+    return KiwiAPI(service, host=host, port=port)

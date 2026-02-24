@@ -107,6 +107,18 @@ class DialoguePipelineMixin:
             level="INFO",
         )
 
+        # Publish speaker identified event for external consumers
+        if EVENT_BUS_AVAILABLE:
+            try:
+                get_event_bus().publish(EventType.SPEAKER_IDENTIFIED,
+                    {'speaker_id': ctx.speaker_id, 'speaker_name': ctx.speaker_name,
+                     'priority': int(speaker_meta.get("priority", 2)),
+                     'confidence': ctx.speaker_confidence,
+                     'is_owner': ctx.is_owner},
+                    source='dialogue_pipeline')
+            except Exception:
+                pass
+
         if not ctx.owner_profile_ready and not self._owner_profile_warning_shown:
             kiwi_log(
                 "APPROVAL",

@@ -331,6 +331,9 @@ class KiwiServiceOpenClaw(
             except Exception as e:
                 kiwi_log("KIWI", f"Voice Security init failed: {e}", level="WARNING")
 
+        # REST API server (started in start() if enabled)
+        self._api = None
+
         # Service state
         self.is_running = False
 
@@ -481,6 +484,15 @@ class KiwiServiceOpenClaw(
                 source='kiwi_service'
             )
 
+        # Start REST API server (before listener so it is available early)
+        if self.config.api_enabled:
+            try:
+                from kiwi.api import KiwiAPI
+                self._api = KiwiAPI(self, host=self.config.api_host, port=self.config.api_port)
+                self._api.start()
+            except Exception as e:
+                kiwi_log("SERVICE", f"API server failed to start: {e}", level="WARNING")
+
         self.play_startup_sound()
 
         self.is_running = True
@@ -535,6 +547,13 @@ class KiwiServiceOpenClaw(
             self._task_status_announcer = None
 
         self._cancel_idle_timer()
+
+        if self._api:
+            try:
+                self._api.stop()
+            except Exception:
+                pass
+            self._api = None
 
         if getattr(self, '_voice_security', None):
             self._voice_security.stop()

@@ -50,6 +50,22 @@ except ImportError:
     UNIFIED_VAD_AVAILABLE = False
     kiwi_log("LISTENER", "Unified VAD not available")
 
+# Hardware AEC (Acoustic Echo Cancellation)
+try:
+    from kiwi.hardware_aec import HardwareAEC, create_aec_from_config
+    HARDWARE_AEC_AVAILABLE = True
+except ImportError:
+    HARDWARE_AEC_AVAILABLE = False
+    kiwi_log("LISTENER", "Hardware AEC not available")
+
+# Event Bus
+try:
+    from kiwi.event_bus import EventType, get_event_bus
+    EVENT_BUS_AVAILABLE = True
+except ImportError:
+    EVENT_BUS_AVAILABLE = False
+    kiwi_log("LISTENER", "Event Bus not available")
+
 # Noise Reduction (spectral gating)
 try:
     import noisereduce as nr
@@ -593,6 +609,36 @@ class KiwiListener:
         self._streaming_thread: Optional[threading.Thread] = None
         self._streaming_stop_event = threading.Event()
 
+        # === UNIFIED VAD: Replaces inline Silero VAD when available ===
+        self._unified_vad = None
+        self._unified_vad_available = False
+        if UNIFIED_VAD_AVAILABLE:
+            try:
+                self._unified_vad = UnifiedVAD(
+                    sample_rate=self.config.sample_rate,
+                    silero_threshold=0.4,
+                    energy_threshold_multiplier=self.config.noise_threshold_multiplier,
+                    energy_min_threshold=self.config.min_speech_volume,
+                )
+                self._unified_vad_available = True
+                kiwi_log("LISTENER", "UnifiedVAD initialized", level="INFO")
+            except Exception as e:
+                kiwi_log("LISTENER", f"UnifiedVAD unavailable, using inline VAD: {e}", level="WARNING")
+                self._unified_vad_available = False
+
+        # === HARDWARE AEC: Echo cancellation ===
+        self._aec = None
+        self._aec_available = False
+        if HARDWARE_AEC_AVAILABLE:
+            try:
+                self._aec = create_aec_from_config()
+                self._aec_available = True
+                kiwi_log("LISTENER", f"AEC initialized: {self._aec.__class__.__name__}", level="INFO")
+            except Exception as e:
+                kiwi_log("LISTENER", f"AEC unavailable: {e}", level="WARNING")
+                self._aec = None
+                self._aec_available = False
+
         # Instance copies from ListenerConfig (overridden by config.yaml)
         self._silence_duration_end = self.config.silence_duration_end
         self._min_speech_volume = self.config.min_speech_volume
@@ -975,6 +1021,18 @@ class KiwiListener:
         time.sleep(0.5)
         self._is_muted = False
         kiwi_log("MUTE", "Microphone unmuted")
+
+    def feed_aec_reference(self, reference_audio):
+        """Feed TTS output as reference for echo cancellation.
+
+        Called by the service/TTS layer when generating audio so that
+        the AEC module can subtract TTS echo from the microphone signal.
+        """
+        if self._aec_available and self._aec is not None:
+            try:
+                self._aec.update_reference(reference_audio)
+            except Exception:
+                pass  # AEC reference feeding failure is non-fatal
     
     def _is_phantom_text(self, text: str) -> bool:
         """Checks if text is phantom (Whisper hallucination)."""
@@ -1064,7 +1122,7 @@ class KiwiListener:
         kiwi_log("LISTENER", "Model loaded, calibrating...")
         self._calibrate_noise_floor()  # Calibrate noise threshold
         kiwi_log("LISTENER", "Calibration done")
-        
+
         # Load VAD at start (not lazily) - fix for 'noVAD' problem
         kiwi_log("LISTENER", "Loading VAD...")
         self._ensure_vad_loaded()
@@ -1073,6 +1131,21 @@ class KiwiListener:
             self._reset_vad_state()  # Reset initial state
         else:
             kiwi_log("LISTENER", "VAD not available, will use energy-based fallback", level="WARNING")
+
+        # Calibrate UnifiedVAD noise floor if available
+        if self._unified_vad_available and self._unified_vad is not None:
+            kiwi_log("LISTENER", "Calibrating UnifiedVAD noise floor...", level="INFO")
+            try:
+                # Use the already-calibrated noise floor from _calibrate_noise_floor()
+                # to seed UnifiedVAD with a synthetic calibration sample
+                self._unified_vad._noise_floor = self._noise_floor
+                self._unified_vad._adaptive_threshold = max(
+                    self._noise_floor * self._unified_vad.energy_threshold_multiplier,
+                    self._unified_vad.energy_min_threshold,
+                )
+                kiwi_log("LISTENER", f"UnifiedVAD noise floor set to {self._noise_floor:.6f}", level="INFO")
+            except Exception as e:
+                kiwi_log("LISTENER", f"UnifiedVAD calibration failed: {e}", level="WARNING")
         
         self.is_running = True
         self._streaming_stop_event.clear()
@@ -1272,14 +1345,23 @@ class KiwiListener:
             self._vad_loaded = True
 
     def _reset_vad_state(self):
-        """Resets internal state of Silero VAD (hidden state).
-        
+        """Resets internal state of VAD (hidden state).
+
+        Resets UnifiedVAD (if available) and inline Silero VAD.
         This is important because Silero VAD is an RNN, and its hidden state accumulates.
         Without reset the state becomes 'stale' and VAD stops working correctly.
         """
+        # Reset UnifiedVAD if available
+        if self._unified_vad_available and self._unified_vad is not None:
+            try:
+                self._unified_vad.reset()
+            except Exception as e:
+                kiwi_log("VAD", f"Error resetting UnifiedVAD state: {e}", level="ERROR")
+
+        # Reset inline Silero VAD
         if not self._vad_enabled or self._vad_model is None:
             return
-        
+
         try:
             # Silero VAD has a reset_states() method for resetting hidden state
             if hasattr(self._vad_model, 'reset_states'):
@@ -1289,23 +1371,32 @@ class KiwiListener:
             kiwi_log("VAD", f"Error resetting state: {e}", level="ERROR")
     
     def _check_vad(self, audio_chunk: np.ndarray) -> bool:
-        """Checks an audio chunk via Silero VAD -- is it speech or noise?
-        
-        Silero VAD runs ~1ms per chunk, fully local.
-        If VAD unavailable -- falls back to True (passes everything through).
-        
+        """Checks an audio chunk via VAD -- is it speech or noise?
+
+        Delegates to UnifiedVAD when available, otherwise falls back
+        to inline Silero VAD. ~1ms per chunk, fully local.
+
         Args:
             audio_chunk: numpy float32 array, 16kHz
-            
+
         Returns:
             True if speech detected
         """
+        # Use UnifiedVAD if available (combines Silero + energy + Whisper)
+        if self._unified_vad_available and self._unified_vad is not None:
+            try:
+                result = self._unified_vad.is_speech(audio_chunk)
+                return result.is_speech
+            except Exception:
+                pass  # Fall through to inline VAD
+
+        # Fallback: inline Silero VAD
         # Lazy load VAD on first call
         self._ensure_vad_loaded()
-        
+
         if not self._vad_enabled or self._vad_model is None:
             return True  # Fallback: assume it is speech
-        
+
         try:
             # Silero VAD expects torch tensor, 16kHz, mono
             audio_tensor = torch.from_numpy(audio_chunk).float()
@@ -1313,7 +1404,7 @@ class KiwiListener:
             # But can also work with arbitrary length if > 512
             if len(audio_tensor) < 512:
                 return True  # Chunk too short
-            
+
             confidence = self._vad_model(audio_tensor, self.config.sample_rate).item()
             return confidence > 0.5  # Threshold: >50% speech probability
         except Exception:
@@ -1387,9 +1478,16 @@ class KiwiListener:
                 except:
                     pass
             
+            # === AEC: Process audio through echo cancellation before VAD/STT ===
+            if self._aec_available and self._aec is not None:
+                try:
+                    audio_chunk = self._aec.process(audio_chunk)
+                except Exception:
+                    pass  # AEC failure is non-fatal; proceed with raw audio
+
             # === BARGE-IN: Check if Kiwi is currently speaking ===
             is_kiwi_speaking = self._is_kiwi_speaking()
-            
+
             # === PROTECTION FROM PHANTOM SOUNDS ===
             # Check both thresholds: adaptive AND minimum
             effective_min_speech_volume = self._get_effective_min_speech_volume()
@@ -1417,21 +1515,43 @@ class KiwiListener:
                 if is_sound:
                     time_since_tts = time.time() - self._tts_start_time
                     if time_since_tts >= self._barge_in_grace_period:
-                        barge_in_threshold = max(
-                            self._silence_threshold * self._barge_in_volume_multiplier,
-                            self._barge_in_min_volume
-                        )
-                        # Sliding window: remember each chunk result
-                        chunk_passed = volume > barge_in_threshold and self._check_vad(audio_chunk)
-                        self._barge_in_window.append(chunk_passed)
-                        if len(self._barge_in_window) > self._barge_in_window_size:
-                            self._barge_in_window = self._barge_in_window[-self._barge_in_window_size:]
+                        # Use UnifiedVAD barge-in detection when available
+                        _used_unified_vad = False
+                        if self._unified_vad_available and self._unified_vad is not None:
+                            try:
+                                tts_vol = self._silence_threshold * self._barge_in_volume_multiplier
+                                if self._unified_vad.is_barge_in(audio_chunk, True, tts_vol):
+                                    kiwi_log("BARGE-IN", f"Confirmed via UnifiedVAD! vol={volume:.4f}")
+                                    self._request_barge_in()
+                                    self._barge_in_window.clear()
+                                    # Publish barge-in event
+                                    if EVENT_BUS_AVAILABLE:
+                                        get_event_bus().publish(EventType.TTS_BARGE_IN,
+                                            {'volume': volume}, source='listener')
+                                else:
+                                    # UnifiedVAD said no barge-in; clear window
+                                    self._barge_in_window.clear()
+                                _used_unified_vad = True
+                            except Exception:
+                                _used_unified_vad = False  # Fall through to inline
 
-                        hits = sum(self._barge_in_window)
-                        if hits >= self._barge_in_chunks_required:
-                            kiwi_log("BARGE-IN", f"Confirmed! vol={volume:.4f}, threshold={barge_in_threshold:.4f}, hits={hits}/{len(self._barge_in_window)}")
-                            self._request_barge_in()
-                            self._barge_in_window.clear()
+                        if not _used_unified_vad:
+                            # Fallback: inline barge-in detection
+                            barge_in_threshold = max(
+                                self._silence_threshold * self._barge_in_volume_multiplier,
+                                self._barge_in_min_volume
+                            )
+                            # Sliding window: remember each chunk result
+                            chunk_passed = volume > barge_in_threshold and self._check_vad(audio_chunk)
+                            self._barge_in_window.append(chunk_passed)
+                            if len(self._barge_in_window) > self._barge_in_window_size:
+                                self._barge_in_window = self._barge_in_window[-self._barge_in_window_size:]
+
+                            hits = sum(self._barge_in_window)
+                            if hits >= self._barge_in_chunks_required:
+                                kiwi_log("BARGE-IN", f"Confirmed! vol={volume:.4f}, threshold={barge_in_threshold:.4f}, hits={hits}/{len(self._barge_in_window)}")
+                                self._request_barge_in()
+                                self._barge_in_window.clear()
                     else:
                         self._barge_in_window.clear()
                 else:
@@ -1477,7 +1597,17 @@ class KiwiListener:
             # NORMAL MODE: Kiwi is NOT speaking -- normal speech recording
             # =================================================================
             self._barge_in_counter = 0  # Reset barge-in (not needed when Kiwi is silent)
-            
+
+            # Publish VAD events to event bus
+            if EVENT_BUS_AVAILABLE:
+                try:
+                    if is_sound:
+                        get_event_bus().publish(EventType.VAD_SPEECH_DETECTED,
+                            {'volume': volume, 'threshold': self._silence_threshold},
+                            source='listener')
+                except Exception:
+                    pass  # Event bus publishing is non-critical
+
             if is_sound:
                 # Additional check via Silero VAD before starting recording
                 if not is_speaking and self._vad_enabled:
@@ -2029,6 +2159,17 @@ class KiwiListener:
                     )
                 except Exception as e:
                     kiwi_log("SPEAKER_MANAGER", f"Context update error: {e}", level="ERROR")
+
+                # Publish speaker identification event
+                if EVENT_BUS_AVAILABLE:
+                    try:
+                        get_event_bus().publish(EventType.SPEAKER_IDENTIFIED,
+                            {'speaker_id': speaker_id, 'speaker_name': speaker_name,
+                             'priority': int(meta.get("priority", 2)),
+                             'confidence': float(meta.get("confidence", 0.0))},
+                            source='speaker_manager')
+                    except Exception:
+                        pass
             
             if speaker_id != "self" and not self._is_owner_speaker(speaker_id):
                 self._last_non_owner_activity_at = time.time()
@@ -2069,11 +2210,21 @@ class KiwiListener:
                     continue
                 
                 is_address, command = self.detector.is_direct_address(text)
-                
+
                 if is_address:
                     # Activate dialog mode in any case (with or without command)
                     self.activate_dialog_mode()
-                    
+
+                    # Publish wake word detected event
+                    if EVENT_BUS_AVAILABLE:
+                        try:
+                            get_event_bus().publish(EventType.WAKE_WORD_DETECTED,
+                                {'command': command or '', 'speaker': speaker_name,
+                                 'text': text},
+                                source='listener')
+                        except Exception:
+                            pass
+
                     if command:
                         # Wake word + command -- process immediately
                         kiwi_log("KIWI", f"Wake word detected! Command: {command}")

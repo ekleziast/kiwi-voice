@@ -124,6 +124,11 @@ class KiwiConfig:
     # Owner name (from speaker_priority.owner.name in config.yaml)
     owner_name: str = "Owner"
 
+    # REST API server
+    api_enabled: bool = True
+    api_host: str = "0.0.0.0"
+    api_port: int = 7789
+
     @staticmethod
     def _sync_local_qwen_model_path(model_path: Optional[str], model_size: str) -> str:
         """Keep local Qwen path aligned with selected model size."""
@@ -303,6 +308,25 @@ class KiwiConfig:
         config.ws_max_reconnect_attempts = ws_cfg.get("max_reconnect_attempts", config.ws_max_reconnect_attempts)
         config.ws_ping_interval = float(ws_cfg.get("ping_interval", config.ws_ping_interval))
         config.ws_ping_timeout = float(ws_cfg.get("ping_timeout", config.ws_ping_timeout))
+
+        # REST API settings from YAML
+        api_cfg = yaml_config.get("api", {})
+        if isinstance(api_cfg, dict):
+            raw_api_enabled = api_cfg.get("enabled", config.api_enabled)
+            if isinstance(raw_api_enabled, str):
+                config.api_enabled = raw_api_enabled.strip().lower() in ("true", "1", "yes")
+            else:
+                config.api_enabled = bool(raw_api_enabled)
+            config.api_host = str(api_cfg.get("host", config.api_host)).strip()
+            config.api_port = int(api_cfg.get("port", config.api_port))
+
+        # Env var overrides for API
+        if os.getenv("KIWI_API_ENABLED"):
+            config.api_enabled = os.getenv("KIWI_API_ENABLED").strip().lower() in ("true", "1", "yes")
+        if os.getenv("KIWI_API_HOST"):
+            config.api_host = os.getenv("KIWI_API_HOST").strip()
+        if os.getenv("KIWI_API_PORT"):
+            config.api_port = int(os.getenv("KIWI_API_PORT"))
 
         if os.getenv("KIWI_LANGUAGE"):
             config.language = os.getenv("KIWI_LANGUAGE").strip() or "ru"

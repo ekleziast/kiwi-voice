@@ -12,6 +12,13 @@ from kiwi.state_machine import DialogueState
 from kiwi.text_processing import clean_chunk_for_tts, normalize_tts_text, split_text_into_chunks
 from kiwi.utils import kiwi_log
 
+# Event Bus for TTS events
+try:
+    from kiwi.event_bus import EventType, get_event_bus
+    _TTS_EVENT_BUS_AVAILABLE = True
+except ImportError:
+    _TTS_EVENT_BUS_AVAILABLE = False
+
 # Language code → TTS language name mapping
 _LANG_TO_TTS_NAME = {
     "ru": "Russian",
@@ -331,6 +338,13 @@ class TTSSpeechMixin:
                 kiwi_log("TTS-CHUNK", f"Skip playback: invalid sample_rate={sample_rate}", level="WARNING")
                 return
 
+            # Feed TTS audio to AEC as reference for echo cancellation
+            if hasattr(self, 'listener') and self.listener and hasattr(self.listener, 'feed_aec_reference'):
+                try:
+                    self.listener.feed_aec_reference(audio)
+                except Exception:
+                    pass
+
             if audio.dtype != np.float32:
                 audio = audio.astype(np.float32)
             peak = float(np.max(np.abs(audio))) if audio.size else 0.0
@@ -462,6 +476,14 @@ class TTSSpeechMixin:
 
         self._set_state(DialogueState.SPEAKING)
 
+        # Publish TTS started event
+        if _TTS_EVENT_BUS_AVAILABLE:
+            try:
+                get_event_bus().publish(EventType.TTS_STARTED,
+                    {'text': text[:200]}, source='tts')
+            except Exception:
+                pass
+
         text = normalize_tts_text(text)
 
         if not text:
@@ -526,6 +548,13 @@ class TTSSpeechMixin:
                 import traceback
                 traceback.print_exc()
                 self._set_state(DialogueState.IDLE)
+
+        # Publish TTS ended event
+        if _TTS_EVENT_BUS_AVAILABLE:
+            try:
+                get_event_bus().publish(EventType.TTS_ENDED, {}, source='tts')
+            except Exception:
+                pass
 
         self.listener.activate_dialog_mode()
 

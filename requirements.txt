@@ -37,3 +37,6 @@ noisereduce>=3.0.0
 
 # Device identity (Ed25519 signing for gateway auth)
 cryptography>=41.0.0
+
+# REST API server
+aiohttp>=3.9.0

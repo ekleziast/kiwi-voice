@@ -195,6 +195,13 @@ class AudioPlaybackMixin:
             if np.abs(audio).max() > 1.0:
                 audio = audio / np.abs(audio).max()
 
+            # Feed TTS audio to AEC as reference for echo cancellation
+            if hasattr(self, 'listener') and self.listener and hasattr(self.listener, 'feed_aec_reference'):
+                try:
+                    self.listener.feed_aec_reference(audio)
+                except Exception:
+                    pass
+
             self._is_speaking = True
             self._barge_in_requested = False
 
@@ -256,6 +263,13 @@ class AudioPlaybackMixin:
                 audio = audio.astype(np.float32)
             if np.abs(audio).max() > 1.0:
                 audio = audio / np.abs(audio).max()
+
+            # Feed TTS audio to AEC as reference for echo cancellation
+            if hasattr(self, 'listener') and self.listener and hasattr(self.listener, 'feed_aec_reference'):
+                try:
+                    self.listener.feed_aec_reference(audio)
+                except Exception:
+                    pass
 
             self._is_speaking = True
             if hasattr(self, "listener") and self.listener:

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kiwi Voice Dashboard</title>
+    <link rel="stylesheet" href="static/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F95D;</text></svg>">
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1 class="logo">&#x1F95D; Kiwi Voice</h1>
+                <span class="version">Dashboard</span>
+            </div>
+            <div class="header-right">
+                <div class="state-indicator" id="state-indicator">
+                    <span class="state-dot" id="state-dot"></span>
+                    <span class="state-label" id="state-label">Connecting...</span>
+                </div>
+                <div class="uptime" id="uptime">Uptime: --:--:--</div>
+            </div>
+        </header>
+
+        <!-- Toast notifications -->
+        <div class="toast-container" id="toast-container"></div>
+
+        <!-- Main grid -->
+        <div class="grid">
+            <!-- Status Card -->
+            <div class="card status-card">
+                <h2 class="card-title">Status</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-label">State</span>
+                        <span class="status-value" id="status-state">
+                            <span class="state-badge state-idle">IDLE</span>
+                        </span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Speaking</span>
+                        <span class="status-value" id="status-speaking">
+                            <span class="indicator-off">No</span>
+                        </span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Processing</span>
+                        <span class="status-value" id="status-processing">
+                            <span class="indicator-off">No</span>
+                        </span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Active Speaker</span>
+                        <span class="status-value" id="status-speaker">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">TTS Provider</span>
+                        <span class="status-value" id="status-tts-provider">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Language Card -->
+            <div class="card language-card">
+                <h2 class="card-title">Language</h2>
+                <div class="language-current">
+                    <span class="status-label">Current Language</span>
+                    <span class="status-value" id="current-language">--</span>
+                </div>
+                <div class="language-controls">
+                    <select id="language-select" class="select-input">
+                        <option value="">Loading...</option>
+                    </select>
+                    <button class="btn btn-primary" id="language-apply-btn" onclick="applyLanguage()">Apply</button>
+                </div>
+            </div>
+
+            <!-- TTS Card -->
+            <div class="card tts-card">
+                <h2 class="card-title">TTS Test</h2>
+                <div class="tts-controls">
+                    <input type="text" id="tts-test-input" class="text-input" placeholder="Enter text to speak..." value="Hello, I am Kiwi!">
+                    <button class="btn btn-primary" id="tts-test-btn" onclick="testTTS()">Speak</button>
+                </div>
+            </div>
+
+            <!-- Controls Card -->
+            <div class="card controls-card">
+                <h2 class="card-title">Controls</h2>
+                <div class="controls-buttons">
+                    <button class="btn btn-danger" onclick="stopService()">
+                        <span class="btn-icon">&#x23F9;</span> Stop Playback
+                    </button>
+                    <button class="btn btn-warning" onclick="resetContext()">
+                        <span class="btn-icon">&#x1F504;</span> Reset Context
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Speakers Card (full width) -->
+        <div class="card speakers-card">
+            <h2 class="card-title">Speakers</h2>
+            <div class="table-container">
+                <table class="speakers-table" id="speakers-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Priority</th>
+                            <th>Samples</th>
+                            <th>Last Seen</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="speakers-tbody">
+                        <tr>
+                            <td colspan="5" class="empty-state">Loading speakers...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Event Log Card (full width) -->
+        <div class="card event-log-card">
+            <div class="card-title-row">
+                <h2 class="card-title">Event Log</h2>
+                <button class="btn btn-small btn-secondary" onclick="clearEventLog()">Clear</button>
+            </div>
+            <div class="event-log" id="event-log">
+                <div class="event-entry event-system">
+                    <span class="event-time">--:--:--</span>
+                    <span class="event-type">SYSTEM</span>
+                    <span class="event-data">Dashboard loaded, waiting for connection...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Connection overlay -->
+        <div class="connection-overlay" id="connection-overlay" style="display: none;">
+            <div class="connection-message">
+                <div class="spinner"></div>
+                <p>Connecting to Kiwi Voice API...</p>
+                <p class="connection-sub">Make sure the service is running on <code>localhost:7789</code></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="static/app.js"></script>
+</body>
+</html>

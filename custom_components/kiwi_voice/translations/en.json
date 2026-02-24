@@ -1,0 +1,17 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Connect to Kiwi Voice",
+                "description": "Enter the host and port of your Kiwi Voice instance.",
+                "data": {
+                    "host": "Host",
+                    "port": "Port"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Cannot connect to Kiwi Voice. Make sure the service is running."
+        }
+    }
+}
