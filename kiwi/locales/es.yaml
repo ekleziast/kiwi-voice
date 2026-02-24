@@ -54,6 +54,11 @@ responses:
   approval_prompt_telegram: "Por favor, confirma en Telegram."
   approval_prompt_register: "Registra la voz del propietario: Kiwi, soy el dueño."
   approval_request: "{owner}, {speaker} pregunta: {command}. {hint}"
+  ha_command_sent: "Comando enviado al hogar inteligente."
+  ha_response: "{response}"
+  ha_not_configured: "La integración con el hogar inteligente no está configurada."
+  ha_connection_error: "No puedo conectarme al hogar inteligente."
+  ha_no_response: "El hogar inteligente no respondió."
 
 # Status announcer fallback messages
 status:
@@ -445,6 +450,40 @@ commands:
     - "comando"
     - "terminal"
     - "shell"
+  ha_trigger_patterns:
+    - "hogar inteligente"
+    - "casa inteligente"
+    - "encender"
+    - "apagar"
+    - "enciende"
+    - "apaga"
+    - "prende"
+    - "luz"
+    - "luces"
+    - "lámpara"
+    - "brillo"
+    - "termostato"
+    - "temperatura"
+    - "aire acondicionado"
+    - "calefacción"
+    - "ventilador"
+    - "televisor"
+    - "televisión"
+    - "cortinas"
+    - "persianas"
+    - "cerradura"
+    - "garaje"
+    - "aspiradora"
+    - "humidificador"
+    - "enchufe"
+    - "sala"
+    - "dormitorio"
+    - "cocina"
+    - "baño"
+    - "pasillo"
+  ha_strip_prefixes:
+    - "hogar inteligente "
+    - "casa inteligente "
 
 # OpenClaw CLI error messages
 cli_errors:

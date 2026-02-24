@@ -54,6 +54,11 @@ responses:
   approval_prompt_telegram: "텔레그램에서 확인해줘."
   approval_prompt_register: "주인 음성 등록: Kiwi, 나는 주인이야."
   approval_request: "{owner}, {speaker}가 요청합니다: {command}. {hint}"
+  ha_command_sent: "스마트 홈에 명령을 보냈어."
+  ha_response: "{response}"
+  ha_not_configured: "스마트 홈 연동이 설정되지 않았어."
+  ha_connection_error: "스마트 홈에 연결할 수 없어."
+  ha_no_response: "스마트 홈이 응답하지 않았어."
 
 # Status announcer fallback messages
 status:
@@ -433,6 +438,41 @@ commands:
     - "명령"
     - "터미널"
     - "셸"
+  ha_trigger_patterns:
+    - "스마트 홈"
+    - "smart home"
+    - "불 켜줘"
+    - "불 꺼줘"
+    - "조명 켜줘"
+    - "조명 꺼줘"
+    - "켜줘"
+    - "꺼줘"
+    - "조명"
+    - "불"
+    - "램프"
+    - "밝기"
+    - "온도조절기"
+    - "온도"
+    - "에어컨"
+    - "난방"
+    - "선풍기"
+    - "텔레비전"
+    - "TV"
+    - "커튼"
+    - "블라인드"
+    - "잠금"
+    - "차고"
+    - "청소기"
+    - "가습기"
+    - "콘센트"
+    - "거실"
+    - "침실"
+    - "주방"
+    - "욕실"
+    - "복도"
+  ha_strip_prefixes:
+    - "스마트 홈 "
+    - "smart home "
 
 # OpenClaw CLI error messages
 cli_errors:

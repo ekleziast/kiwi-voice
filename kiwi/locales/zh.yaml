@@ -54,6 +54,11 @@ responses:
   approval_prompt_telegram: "请在Telegram中确认。"
   approval_prompt_register: "注册主人声音：Kiwi，我是主人。"
   approval_request: "{owner}，{speaker}请求：{command}。{hint}"
+  ha_command_sent: "已发送指令到智能家居。"
+  ha_response: "{response}"
+  ha_not_configured: "智能家居集成未配置。"
+  ha_connection_error: "无法连接到智能家居。"
+  ha_no_response: "智能家居没有响应。"
 
 # Status announcer fallback messages
 status:
@@ -435,6 +440,38 @@ commands:
     - "命令"
     - "终端"
     - "命令行"
+  ha_trigger_patterns:
+    - "智能家居"
+    - "smart home"
+    - "开灯"
+    - "关灯"
+    - "打开灯"
+    - "关闭灯"
+    - "灯"
+    - "灯光"
+    - "台灯"
+    - "亮度"
+    - "恒温器"
+    - "温度"
+    - "空调"
+    - "暖气"
+    - "风扇"
+    - "电视"
+    - "窗帘"
+    - "百叶窗"
+    - "门锁"
+    - "车库"
+    - "扫地机"
+    - "加湿器"
+    - "插座"
+    - "客厅"
+    - "卧室"
+    - "厨房"
+    - "浴室"
+    - "走廊"
+  ha_strip_prefixes:
+    - "智能家居 "
+    - "smart home "
 
 # OpenClaw CLI error messages
 cli_errors:

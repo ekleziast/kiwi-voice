@@ -54,6 +54,11 @@ responses:
   approval_prompt_telegram: "يرجى التأكيد في Telegram."
   approval_prompt_register: "سجّل صوت المالك: Kiwi، أنا المالك."
   approval_request: "{owner}، {speaker} يسأل: {command}. {hint}"
+  ha_command_sent: "تم إرسال الأمر إلى المنزل الذكي."
+  ha_response: "{response}"
+  ha_not_configured: "تكامل المنزل الذكي غير مُعدّ."
+  ha_connection_error: "لا أستطيع الاتصال بالمنزل الذكي."
+  ha_no_response: "المنزل الذكي لم يستجب."
 
 # Status announcer fallback messages
 status:
@@ -443,6 +448,40 @@ commands:
     - "أمر"
     - "طرفية"
     - "شل"
+  ha_trigger_patterns:
+    - "المنزل الذكي"
+    - "منزل ذكي"
+    - "smart home"
+    - "شغّل"
+    - "أطفئ"
+    - "أشعل"
+    - "إضاءة"
+    - "ضوء"
+    - "أضواء"
+    - "مصباح"
+    - "سطوع"
+    - "ترموستات"
+    - "درجة الحرارة"
+    - "مكيف"
+    - "تدفئة"
+    - "مروحة"
+    - "تلفزيون"
+    - "تلفاز"
+    - "ستائر"
+    - "قفل"
+    - "كراج"
+    - "مكنسة"
+    - "مرطب"
+    - "مقبس"
+    - "غرفة المعيشة"
+    - "غرفة النوم"
+    - "المطبخ"
+    - "الحمام"
+    - "الممر"
+  ha_strip_prefixes:
+    - "المنزل الذكي "
+    - "منزل ذكي "
+    - "smart home "
 
 # OpenClaw CLI error messages
 cli_errors:

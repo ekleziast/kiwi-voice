@@ -54,6 +54,11 @@ responses:
   approval_prompt_telegram: "Veuillez confirmer sur Telegram."
   approval_prompt_register: "Enregistrez la voix du propriétaire : Kiwi, je suis le propriétaire."
   approval_request: "{owner}, {speaker} demande : {command}. {hint}"
+  ha_command_sent: "Commande envoyée à la maison connectée."
+  ha_response: "{response}"
+  ha_not_configured: "L'intégration maison connectée n'est pas configurée."
+  ha_connection_error: "Impossible de se connecter à la maison connectée."
+  ha_no_response: "La maison connectée n'a pas répondu."
 
 # Status announcer fallback messages
 status:
@@ -450,6 +455,41 @@ commands:
     - "commande"
     - "terminal"
     - "shell"
+  ha_trigger_patterns:
+    - "maison connectée"
+    - "maison intelligente"
+    - "domotique"
+    - "allume"
+    - "éteins"
+    - "allumer"
+    - "éteindre"
+    - "lumière"
+    - "lumières"
+    - "lampe"
+    - "luminosité"
+    - "thermostat"
+    - "température"
+    - "climatisation"
+    - "chauffage"
+    - "ventilateur"
+    - "télévision"
+    - "télé"
+    - "rideaux"
+    - "volets"
+    - "serrure"
+    - "garage"
+    - "aspirateur"
+    - "humidificateur"
+    - "prise"
+    - "salon"
+    - "chambre"
+    - "cuisine"
+    - "salle de bain"
+    - "couloir"
+  ha_strip_prefixes:
+    - "maison connectée "
+    - "maison intelligente "
+    - "domotique "
 
 # OpenClaw CLI error messages
 cli_errors:

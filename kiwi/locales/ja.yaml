@@ -54,6 +54,11 @@ responses:
   approval_prompt_telegram: "Telegramで確認してください。"
   approval_prompt_register: "オーナーの声を登録：Kiwi、私がオーナーです。"
   approval_request: "{owner}さん、{speaker}がリクエストしています：{command}。{hint}"
+  ha_command_sent: "スマートホームにコマンドを送信しました。"
+  ha_response: "{response}"
+  ha_not_configured: "スマートホーム連携が設定されていません。"
+  ha_connection_error: "スマートホームに接続できません。"
+  ha_no_response: "スマートホームから応答がありません。"
 
 # Status announcer fallback messages
 status:
@@ -434,6 +439,41 @@ commands:
     - "コマンド"
     - "ターミナル"
     - "シェル"
+  ha_trigger_patterns:
+    - "スマートホーム"
+    - "smart home"
+    - "電気つけて"
+    - "電気消して"
+    - "ライトつけて"
+    - "ライト消して"
+    - "つけて"
+    - "消して"
+    - "電気"
+    - "ライト"
+    - "照明"
+    - "ランプ"
+    - "明るさ"
+    - "サーモスタット"
+    - "温度"
+    - "エアコン"
+    - "暖房"
+    - "扇風機"
+    - "テレビ"
+    - "カーテン"
+    - "ブラインド"
+    - "鍵"
+    - "ガレージ"
+    - "掃除機"
+    - "加湿器"
+    - "コンセント"
+    - "リビング"
+    - "寝室"
+    - "キッチン"
+    - "お風呂"
+    - "廊下"
+  ha_strip_prefixes:
+    - "スマートホーム "
+    - "smart home "
 
 # OpenClaw CLI error messages
 cli_errors:

@@ -54,6 +54,11 @@ responses:
   approval_prompt_telegram: "Lütfen Telegram'dan onayla."
   approval_prompt_register: "Sahip sesini kaydet: Kiwi, ben sahibiyim."
   approval_request: "{owner}, {speaker} şunu soruyor: {command}. {hint}"
+  ha_command_sent: "Akıllı eve komut gönderildi."
+  ha_response: "{response}"
+  ha_not_configured: "Akıllı ev entegrasyonu yapılandırılmamış."
+  ha_connection_error: "Akıllı eve bağlanılamıyor."
+  ha_no_response: "Akıllı ev yanıt vermedi."
 
 # Status announcer fallback messages
 status:
@@ -441,6 +446,39 @@ commands:
     - "komut"
     - "terminal"
     - "kabuk"
+  ha_trigger_patterns:
+    - "akıllı ev"
+    - "smart home"
+    - "aç"
+    - "kapat"
+    - "yak"
+    - "söndür"
+    - "ışık"
+    - "ışıklar"
+    - "lamba"
+    - "parlaklık"
+    - "termostat"
+    - "sıcaklık"
+    - "klima"
+    - "ısıtıcı"
+    - "vantilatör"
+    - "televizyon"
+    - "tv"
+    - "perde"
+    - "stor"
+    - "kilit"
+    - "garaj"
+    - "süpürge"
+    - "nemlendirici"
+    - "priz"
+    - "oturma odası"
+    - "yatak odası"
+    - "mutfak"
+    - "banyo"
+    - "koridor"
+  ha_strip_prefixes:
+    - "akıllı ev "
+    - "smart home "
 
 # OpenClaw CLI error messages
 cli_errors:

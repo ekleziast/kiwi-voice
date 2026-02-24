@@ -54,6 +54,11 @@ responses:
   approval_prompt_telegram: "कृपया Telegram में पुष्टि करो।"
   approval_prompt_register: "मालिक की आवाज़ रजिस्टर करो: Kiwi, मैं मालिक हूँ।"
   approval_request: "{owner}, {speaker} पूछ रहा है: {command}। {hint}"
+  ha_command_sent: "स्मार्ट होम को कमांड भेज दी।"
+  ha_response: "{response}"
+  ha_not_configured: "स्मार्ट होम इंटीग्रेशन कॉन्फ़िगर नहीं है।"
+  ha_connection_error: "स्मार्ट होम से कनेक्ट नहीं हो पा रही।"
+  ha_no_response: "स्मार्ट होम ने जवाब नहीं दिया।"
 
 # Status announcer fallback messages
 status:
@@ -443,6 +448,40 @@ commands:
     - "कमांड"
     - "टर्मिनल"
     - "शेल"
+  ha_trigger_patterns:
+    - "स्मार्ट होम"
+    - "smart home"
+    - "लाइट ऑन"
+    - "लाइट ऑफ़"
+    - "बत्ती जलाओ"
+    - "बत्ती बुझाओ"
+    - "लाइट चालू"
+    - "लाइट बंद"
+    - "बत्ती"
+    - "लाइट"
+    - "लैम्प"
+    - "चमक"
+    - "थर्मोस्टैट"
+    - "तापमान"
+    - "एयर कंडीशनर"
+    - "हीटर"
+    - "पंखा"
+    - "टीवी"
+    - "टेलीविज़न"
+    - "पर्दे"
+    - "ताला"
+    - "गैराज"
+    - "वैक्यूम"
+    - "ह्यूमिडिफायर"
+    - "प्लग"
+    - "कमरे में"
+    - "बेडरूम"
+    - "किचन"
+    - "बाथरूम"
+    - "बैठक"
+  ha_strip_prefixes:
+    - "स्मार्ट होम "
+    - "smart home "
 
 # OpenClaw CLI error messages
 cli_errors:

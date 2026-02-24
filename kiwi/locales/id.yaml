@@ -54,6 +54,11 @@ responses:
   approval_prompt_telegram: "Silakan konfirmasi di Telegram."
   approval_prompt_register: "Daftarkan suara pemilik: Kiwi, aku pemiliknya."
   approval_request: "{owner}, {speaker} bertanya: {command}. {hint}"
+  ha_command_sent: "Perintah dikirim ke rumah pintar."
+  ha_response: "{response}"
+  ha_not_configured: "Integrasi rumah pintar belum dikonfigurasi."
+  ha_connection_error: "Tidak bisa terhubung ke rumah pintar."
+  ha_no_response: "Rumah pintar tidak merespons."
 
 # Status announcer fallback messages
 status:
@@ -446,6 +451,39 @@ commands:
     - "perintah"
     - "terminal"
     - "shell"
+  ha_trigger_patterns:
+    - "rumah pintar"
+    - "smart home"
+    - "nyalakan"
+    - "matikan"
+    - "hidupkan"
+    - "padamkan"
+    - "lampu"
+    - "cahaya"
+    - "kecerahan"
+    - "termostat"
+    - "suhu"
+    - "ac"
+    - "pendingin"
+    - "pemanas"
+    - "kipas"
+    - "televisi"
+    - "tv"
+    - "tirai"
+    - "gorden"
+    - "kunci"
+    - "garasi"
+    - "penyedot debu"
+    - "pelembab"
+    - "colokan"
+    - "ruang tamu"
+    - "kamar tidur"
+    - "dapur"
+    - "kamar mandi"
+    - "lorong"
+  ha_strip_prefixes:
+    - "rumah pintar "
+    - "smart home "
 
 # OpenClaw CLI error messages
 cli_errors:
