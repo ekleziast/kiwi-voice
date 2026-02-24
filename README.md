@@ -260,9 +260,12 @@ Currently shipped — **15 languages:**
 
 ## Roadmap
 
+- [ ] Integrate UnifiedVAD and HardwareAEC (code exists, needs wiring)
+- [ ] Event-driven architecture (migrate from callbacks to event bus)
+- [ ] REST API for external integrations
 - [ ] Web UI for configuration
-- [ ] Plugin system for custom wake words
 - [ ] Home Assistant integration
+- [ ] Conversation memory (persistent context across sessions)
 
 ## License
 

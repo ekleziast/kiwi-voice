@@ -250,12 +250,16 @@ Console codepage is set for Unicode output via `ctypes.windll.kernel32.SetConsol
 
 - `SKILL.md` — voice commands, security hierarchy, and deployment info (in Russian)
 
-## Roadmap Status
+## Roadmap
 
-- Phase 1: Stability & Observability — **done**
-- Phase 2: State machine (IDLE → LISTENING → PROCESSING → SPEAKING) — **done**
-- Phase 3: Streaming TTS (sentence-aware splitting) — **done**
-- Phase 4: WebSocket OpenClaw integration — **done**
-- Phase 5: Package structure reorganization — **done**
-- Phase 6: i18n / multi-language support (15 languages) — **done**
-- Phase 7: Unified VAD, AEC, full event-driven architecture — pending
+Phases 1–6 are complete (stability, state machine, streaming TTS, WebSocket, package structure, i18n).
+
+Current roadmap:
+
+- **Integrate UnifiedVAD** — `unified_vad.py` is implemented (Silero+Energy+Whisper voting) but listener.py still uses inline Silero VAD. Wire it in to improve detection accuracy.
+- **Integrate HardwareAEC** — `hardware_aec.py` is implemented (Windows/Linux/macOS + software fallback) but never imported. Needs TTS reference audio capture to cancel echo.
+- **Event-driven architecture** — `event_bus.py` infrastructure exists but only logs STATE_CHANGED. Migrate wake word detection, dialogue pipeline, and TTS to event-driven flow instead of direct callbacks.
+- **REST API** — HTTP API for external integrations and the web UI.
+- **Web UI** — Configuration dashboard (language, TTS provider, wake word, speaker management).
+- **Home Assistant integration** — HA custom component for voice control.
+- **Conversation memory** — Persistent context across sessions.
