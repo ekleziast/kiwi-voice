@@ -104,7 +104,8 @@ class OpenClawWebSocket:
         self._device_identity = self._load_or_create_device_identity()
 
         # Session key format: "agent:{agent_id}:{session_id}"
-        self._session_key = f"agent:{config.openclaw_session_id}:{config.openclaw_session_id}"
+        self._default_session_key = f"agent:{config.openclaw_session_id}:{config.openclaw_session_id}"
+        self._session_key = self._default_session_key
 
         # Current chat run tracking
         self._current_run_id: Optional[str] = None
@@ -279,6 +280,22 @@ class OpenClawWebSocket:
     def _get_ws_url(self) -> str:
         """Build the URL for WebSocket connection (no path!)."""
         return f"ws://{self.config.ws_host}:{self.config.ws_port}"
+
+    def switch_session(self, session_id: Optional[str] = None):
+        """Switch the session key used for chat.send requests.
+
+        Args:
+            session_id: New session ID (e.g. "kiwi-nsfw").
+                        Pass None to revert to the default session.
+        """
+        if session_id:
+            new_key = f"agent:{session_id}:{session_id}"
+        else:
+            new_key = self._default_session_key
+
+        if new_key != self._session_key:
+            self._log_ws(f"Session switched: {self._session_key} -> {new_key}", "INFO")
+            self._session_key = new_key
 
     def connect(self) -> bool:
         """Establish a WebSocket connection to OpenClaw Gateway v3.
@@ -1478,14 +1495,12 @@ class OpenClawWebSocket:
         message: str,
         context: Optional[str] = None,
         callback_mode: str = "streaming",
-        model_override: Optional[str] = None,
     ) -> bool:
         """Send a message via WebSocket using chat.send (protocol v3).
 
         Args:
             message: Message to send
             context: Optional context (appended to the message)
-            model_override: Optional model string for soul-specific LLM switching
 
         Returns:
             True if the request was sent successfully
@@ -1531,10 +1546,6 @@ class OpenClawWebSocket:
                 "idempotencyKey": idempotency_key,
                 "timeoutMs": self.config.openclaw_timeout * 1000
             }
-
-            # Model override (for soul-specific LLM switching)
-            if model_override:
-                chat_params["model"] = model_override
 
             frame = {
                 "type": "req",
