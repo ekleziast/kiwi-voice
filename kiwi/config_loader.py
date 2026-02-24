@@ -134,6 +134,12 @@ class KiwiConfig:
     api_host: str = "0.0.0.0"
     api_port: int = 7789
 
+    # Home Assistant integration
+    ha_enabled: bool = False
+    ha_url: str = ""
+    ha_token: str = ""
+    ha_language: str = ""  # defaults to config.language at runtime
+
     @staticmethod
     def _sync_local_qwen_model_path(model_path: Optional[str], model_size: str) -> str:
         """Keep local Qwen path aligned with selected model size."""
@@ -343,6 +349,32 @@ class KiwiConfig:
             config.api_host = os.getenv("KIWI_API_HOST").strip()
         if os.getenv("KIWI_API_PORT"):
             config.api_port = int(os.getenv("KIWI_API_PORT"))
+
+        # Home Assistant integration
+        ha_cfg = yaml_config.get("homeassistant", {})
+        if isinstance(ha_cfg, dict):
+            raw_ha_enabled = ha_cfg.get("enabled", config.ha_enabled)
+            if isinstance(raw_ha_enabled, str):
+                config.ha_enabled = raw_ha_enabled.strip().lower() in ("true", "1", "yes")
+            else:
+                config.ha_enabled = bool(raw_ha_enabled)
+            config.ha_url = str(ha_cfg.get("url", config.ha_url)).strip()
+            config.ha_token = str(ha_cfg.get("token", config.ha_token)).strip()
+            config.ha_language = str(ha_cfg.get("language", config.ha_language)).strip()
+
+        # Env var overrides for HA
+        if os.getenv("KIWI_HA_ENABLED"):
+            config.ha_enabled = os.getenv("KIWI_HA_ENABLED").strip().lower() in ("true", "1", "yes")
+        if os.getenv("KIWI_HA_URL"):
+            config.ha_url = os.getenv("KIWI_HA_URL").strip()
+        if os.getenv("KIWI_HA_TOKEN"):
+            config.ha_token = os.getenv("KIWI_HA_TOKEN").strip()
+        if os.getenv("KIWI_HA_LANGUAGE"):
+            config.ha_language = os.getenv("KIWI_HA_LANGUAGE").strip()
+
+        # Default HA language to main language
+        if not config.ha_language:
+            config.ha_language = config.language
 
         # Soul env var overrides
         if os.getenv("KIWI_SOUL_DEFAULT"):

@@ -59,6 +59,11 @@ responses:
   nsfw_enabled: "NSFW mode enabled. Model switched."
   soul_reset: "Back to default mode!"
   soul_list: "Available modes: {names}. Currently active: {active}."
+  ha_command_sent: "Sent command to smart home."
+  ha_response: "{response}"
+  ha_not_configured: "Smart home integration is not configured."
+  ha_connection_error: "Cannot connect to smart home."
+  ha_no_response: "Smart home did not respond."
 
 # Status announcer fallback messages
 status:
@@ -466,6 +471,41 @@ commands:
     - "list modes"
     - "list souls"
     - "available modes"
+  # Home Assistant voice command routing
+  ha_trigger_patterns:
+    - "smart home"
+    - "home assistant"
+    - "turn on"
+    - "turn off"
+    - "switch on"
+    - "switch off"
+    - "lights"
+    - "light"
+    - "lamp"
+    - "brightness"
+    - "thermostat"
+    - "temperature"
+    - "air conditioner"
+    - "heater"
+    - "fan"
+    - "television"
+    - "tv"
+    - "curtains"
+    - "blinds"
+    - "lock"
+    - "garage"
+    - "vacuum"
+    - "humidifier"
+    - "plug"
+    - "outlet"
+    - "living room"
+    - "bedroom"
+    - "kitchen"
+    - "bathroom"
+    - "hallway"
+  ha_strip_prefixes:
+    - "smart home "
+    - "home assistant "
 
 # OpenClaw CLI error messages
 cli_errors:

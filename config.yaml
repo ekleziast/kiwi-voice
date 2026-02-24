@@ -221,6 +221,17 @@ souls:
     session: "kiwi-nsfw"  # OpenClaw agent with mistral-7b-instruct
 
 # ---------------------------------------------------------------------------
+# Home Assistant Integration (bidirectional)
+# ---------------------------------------------------------------------------
+# Enables voice control of HA devices via Conversation API.
+# Token: .env → KIWI_HA_TOKEN (or set below)
+homeassistant:
+  enabled: false
+  url: "http://homeassistant.local:8123"
+  token: ""               # Long-Lived Access Token
+  language: ""             # defaults to main language setting
+
+# ---------------------------------------------------------------------------
 # REST API Server
 # ---------------------------------------------------------------------------
 api:

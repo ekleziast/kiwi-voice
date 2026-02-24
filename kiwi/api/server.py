@@ -137,6 +137,9 @@ class KiwiAPI:
         router.add_post("/api/restart", self._handle_restart)
         router.add_post("/api/shutdown", self._handle_shutdown)
         router.add_get("/api/events", self._handle_ws_events)
+        # Home Assistant integration
+        router.add_get("/api/homeassistant/status", self._handle_ha_status)
+        router.add_post("/api/homeassistant/command", self._handle_ha_command)
         # Web UI
         router.add_get("/", self._handle_index)
         web_static_dir = os.path.join(PROJECT_ROOT, "kiwi", "web", "static")
@@ -227,6 +230,10 @@ class KiwiAPI:
                 if soul:
                     active_soul = {"id": soul.id, "name": soul.name, "nsfw": soul.nsfw}
 
+            # Home Assistant status
+            ha_client = getattr(self.service, '_ha_client', None)
+            ha_connected = ha_client.connected if ha_client else False
+
             data = {
                 "state": state,
                 "language": language,
@@ -237,6 +244,7 @@ class KiwiAPI:
                 "uptime_seconds": round(uptime, 1),
                 "active_speaker": active_speaker,
                 "active_soul": active_soul,
+                "homeassistant_connected": ha_connected,
             }
             return _json_response(data)
         except Exception as e:
@@ -645,6 +653,52 @@ class KiwiAPI:
             "nsfw": soul.nsfw,
             "model": soul.model,
         })
+
+    async def _handle_ha_status(self, request: "web.Request") -> "web.Response":
+        """GET /api/homeassistant/status - Home Assistant integration status."""
+        try:
+            ha_client = getattr(self.service, '_ha_client', None)
+            if ha_client is None:
+                return _json_response({
+                    "enabled": False,
+                    "connected": False,
+                    "note": "Home Assistant integration not configured",
+                })
+            return _json_response(ha_client.get_status())
+        except Exception as e:
+            kiwi_log("API", f"Error in /api/homeassistant/status: {e}", level="ERROR")
+            return _error_response(str(e), status=500)
+
+    async def _handle_ha_command(self, request: "web.Request") -> "web.Response":
+        """POST /api/homeassistant/command - Send command to HA Conversation API.
+
+        Body: {"text": "turn on living room lights", "language": "en"}
+        """
+        ha_client = getattr(self.service, '_ha_client', None)
+        if ha_client is None or not ha_client.connected:
+            return _error_response("Home Assistant not connected", status=503)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return _error_response("Invalid JSON body")
+
+        text = body.get("text", "").strip()
+        if not text:
+            return _error_response("'text' field is required")
+
+        language = body.get("language")
+
+        # Run in thread to avoid blocking the API event loop
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None, ha_client.process_command, text, language
+        )
+
+        if response:
+            return _json_response({"response": response, "command": text})
+        else:
+            return _error_response("No response from Home Assistant", status=502)
 
     def _broadcast_event(self, event_type: str, payload: dict):
         """Broadcast an event to all WebSocket clients."""

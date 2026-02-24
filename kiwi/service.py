@@ -349,6 +349,22 @@ class KiwiServiceOpenClaw(
             kiwi_log("KIWI", f"Soul manager not available: {e}", level="WARNING")
             self._soul_manager = None
 
+        # Home Assistant integration
+        self._ha_client = None
+        if self.config.ha_enabled and self.config.ha_url and self.config.ha_token:
+            try:
+                from kiwi.integrations.homeassistant import HomeAssistantClient
+                self._ha_client = HomeAssistantClient(
+                    url=self.config.ha_url,
+                    token=self.config.ha_token,
+                    language=self.config.ha_language,
+                )
+                kiwi_log("KIWI", f"Home Assistant client initialized for {self.config.ha_url}", level="INFO")
+            except Exception as e:
+                kiwi_log("KIWI", f"Home Assistant init failed: {e}", level="WARNING")
+        elif self.config.ha_enabled:
+            kiwi_log("KIWI", "Home Assistant enabled but url/token not configured", level="WARNING")
+
         # REST API server (started in start() if enabled)
         self._api = None
 
@@ -507,6 +523,14 @@ class KiwiServiceOpenClaw(
                 source='kiwi_service'
             )
 
+        # Start Home Assistant client
+        if self._ha_client:
+            try:
+                self._ha_client.start()
+                kiwi_log("KIWI", "Home Assistant client started", level="INFO")
+            except Exception as e:
+                kiwi_log("KIWI", f"Home Assistant client start failed: {e}", level="WARNING")
+
         # Start REST API server (before listener so it is available early)
         if self.config.api_enabled:
             try:
@@ -577,6 +601,13 @@ class KiwiServiceOpenClaw(
             except Exception:
                 pass
             self._api = None
+
+        if self._ha_client:
+            try:
+                self._ha_client.stop()
+            except Exception:
+                pass
+            self._ha_client = None
 
         if getattr(self, '_voice_security', None):
             self._voice_security.stop()

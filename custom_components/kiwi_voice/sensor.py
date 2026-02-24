@@ -26,6 +26,7 @@ async def async_setup_entry(
         KiwiLanguageSensor(coordinator, entry),
         KiwiSpeakerCountSensor(coordinator, entry),
         KiwiUptimeSensor(coordinator, entry),
+        KiwiHomeAssistantSensor(coordinator, entry),
     ])
 
 
@@ -131,3 +132,34 @@ class KiwiUptimeSensor(CoordinatorEntity[KiwiVoiceCoordinator], SensorEntity):
     def native_value(self) -> int:
         """Return the service uptime in seconds."""
         return self.coordinator.data.get("status", {}).get("uptime_seconds", 0)
+
+
+class KiwiHomeAssistantSensor(CoordinatorEntity[KiwiVoiceCoordinator], SensorEntity):
+    """Sensor showing the Home Assistant integration status on Kiwi Voice.
+
+    Reports whether Kiwi's HA client is connected, enabling bidirectional
+    voice control of smart home devices.
+    """
+
+    _attr_icon = "mdi:home-assistant"
+
+    def __init__(
+        self, coordinator: KiwiVoiceCoordinator, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_ha_status"
+        self._attr_name = "Kiwi Voice HA Connection"
+
+    @property
+    def native_value(self) -> str:
+        """Return 'connected' or 'disconnected'."""
+        status = self.coordinator.data.get("status", {})
+        return "connected" if status.get("homeassistant_connected") else "disconnected"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return HA integration details."""
+        status = self.coordinator.data.get("status", {})
+        return {
+            "homeassistant_connected": status.get("homeassistant_connected", False),
+        }

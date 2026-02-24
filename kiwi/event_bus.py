@@ -62,7 +62,12 @@ class EventType(Enum):
     ERROR_TRANSCRIPTION = auto()
     ERROR_TTS = auto()
     ERROR_LLM = auto()
-    
+
+    # Home Assistant
+    HA_COMMAND_SENT = auto()
+    HA_COMMAND_RESPONSE = auto()
+    HA_CONNECTION_CHANGED = auto()
+
     # System
     SYSTEM_STARTUP = auto()
     SYSTEM_SHUTDOWN = auto()

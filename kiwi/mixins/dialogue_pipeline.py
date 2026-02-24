@@ -58,6 +58,7 @@ class DialoguePipelineMixin:
             self._stage_handle_stop_cancel,
             self._stage_completeness_check,
             self._stage_owner_approval_gate,
+            self._stage_homeassistant_routing,
             self._stage_dispatch_to_llm,
         ]:
             stage(ctx)
@@ -406,6 +407,63 @@ class DialoguePipelineMixin:
             self.listener.activate_dialog_mode()
             self._set_state(DialogueState.LISTENING)
             ctx.abort = True
+
+    def _stage_homeassistant_routing(self, ctx: CommandContext) -> None:
+        """Route smart-home commands to Home Assistant Conversation API."""
+        ha_client = getattr(self, '_ha_client', None)
+        if not ha_client or not ha_client.connected:
+            return
+
+        command_lower = ctx.command_lower
+
+        # Check if command matches any HA trigger pattern
+        ha_patterns = t("commands.ha_trigger_patterns")
+        if not isinstance(ha_patterns, list):
+            return
+
+        matched = any(pattern in command_lower for pattern in ha_patterns)
+        if not matched:
+            return
+
+        kiwi_log("HA", f"Routing to Home Assistant: {ctx.command}", level="INFO")
+
+        # Strip HA prefixes (e.g. "smart home turn on lights" -> "turn on lights")
+        ha_command = ctx.command
+        strip_prefixes = t("commands.ha_strip_prefixes")
+        if isinstance(strip_prefixes, list):
+            for prefix in strip_prefixes:
+                if command_lower.startswith(prefix):
+                    ha_command = ctx.command[len(prefix):].strip()
+                    break
+
+        if EVENT_BUS_AVAILABLE:
+            try:
+                get_event_bus().publish(EventType.HA_COMMAND_SENT,
+                    {'command': ha_command, 'original': ctx.command},
+                    source='dialogue_pipeline')
+            except Exception:
+                pass
+
+        self.play_beep(async_mode=True)
+
+        # Send to HA Conversation API (blocking call from pipeline thread)
+        response = ha_client.process_command(ha_command)
+
+        if response:
+            kiwi_log("HA", f"Response: {response[:100]}", level="INFO")
+            if EVENT_BUS_AVAILABLE:
+                try:
+                    get_event_bus().publish(EventType.HA_COMMAND_RESPONSE,
+                        {'command': ha_command, 'response': response},
+                        source='dialogue_pipeline')
+                except Exception:
+                    pass
+            self.speak(response, style="confident")
+        else:
+            kiwi_log("HA", "No response from HA", level="WARNING")
+            self.speak(t("responses.ha_no_response"), style="calm")
+
+        ctx.abort = True
 
     def _stage_dispatch_to_llm(self, ctx: CommandContext) -> None:
         """Event, beep, THINKING, streaming/blocking dispatch."""
