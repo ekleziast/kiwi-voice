@@ -12,6 +12,10 @@
   <a href="https://github.com/ekleziast/kiwi-voice/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
   <a href="https://github.com/openclaw/openclaw"><img src="https://img.shields.io/badge/backend-OpenClaw-orange.svg" alt="OpenClaw"></a>
+  <br>
+  <a href="https://ekleziast.github.io/kiwi-website/"><strong>Website</strong></a> &middot;
+  <a href="https://github.com/ekleziast/kiwi-voice/issues">Issues</a> &middot;
+  <a href="https://docs.openclaw.ai">OpenClaw Docs</a>
 </p>
 
 ---
@@ -272,9 +276,19 @@ api:
 
 ## Home Assistant Integration
 
+Bidirectional integration: control Kiwi from HA dashboard, and control your smart home by voice through Kiwi via the Conversation API.
+
 Copy `custom_components/kiwi_voice/` to your HA `custom_components/` directory. Add the integration via the HA UI — it auto-discovers Kiwi Voice on your network.
 
-**Entities:** state sensor, language sensor, speakers count, uptime, listening switch, stop/reset/TTS buttons, TTS platform.
+**Entities:** state sensor, language sensor, HA connection sensor, speakers count, uptime, listening switch, stop/reset/TTS buttons, TTS platform, voice control services.
+
+**Voice control:** Say *"Kiwi, turn on the lights"* — the command is routed to HA Conversation API and the response is spoken back. Configure in `config.yaml`:
+```yaml
+homeassistant:
+  enabled: true
+  url: "http://homeassistant.local:8123"
+  token: ""  # Long-Lived Access Token
+```
 
 ## License
 
