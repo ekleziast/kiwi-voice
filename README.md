@@ -265,7 +265,6 @@ Currently shipped — **15 languages:**
 - [ ] REST API for external integrations
 - [ ] Web UI for configuration
 - [ ] Home Assistant integration
-- [ ] Conversation memory (persistent context across sessions)
 
 ## License
 

@@ -262,4 +262,3 @@ Current roadmap:
 - **REST API** — HTTP API for external integrations and the web UI.
 - **Web UI** — Configuration dashboard (language, TTS provider, wake word, speaker management).
 - **Home Assistant integration** — HA custom component for voice control.
-- **Conversation memory** — Persistent context across sessions.
