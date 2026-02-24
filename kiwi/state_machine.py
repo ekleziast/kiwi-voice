@@ -3,9 +3,9 @@
 
 
 class DialogueState:
-    """Состояния диалога - state machine для управления процессом."""
-    IDLE = "idle"           # Ожидание wake word
-    LISTENING = "listening" # Слушаем команду
-    PROCESSING = "processing" # Проверяем completeness/intent (LLM busy)
-    THINKING = "thinking"   # Ждём ответа от OpenClaw
-    SPEAKING = "speaking"   # TTS воспроизведение
+    """Dialogue states - state machine for process control."""
+    IDLE = "idle"           # Waiting for wake word
+    LISTENING = "listening" # Listening for command
+    PROCESSING = "processing" # Checking completeness/intent (LLM busy)
+    THINKING = "thinking"   # Waiting for OpenClaw response
+    SPEAKING = "speaking"   # TTS playback

@@ -1,10 +1,10 @@
 """
-Event-Based Architecture - Центральная шина событий
+Event-Based Architecture - Central event bus
 
-Заменяет polling на event-driven подход:
-- Компоненты публикуют события вместо прямых вызовов
-- Обработчики подписываются на интересующие события
-- Асинхронная обработка через очереди
+Replaces polling with event-driven approach:
+- Components publish events instead of direct calls
+- Handlers subscribe to events of interest
+- Asynchronous processing via queues
 """
 
 import threading
@@ -21,14 +21,14 @@ from kiwi.utils import kiwi_log
 
 
 class EventType(Enum):
-    """Типы событий системы."""
-    # Аудио события
+    """System event types."""
+    # Audio events
     SPEECH_STARTED = auto()
     SPEECH_ENDED = auto()
     WAKE_WORD_DETECTED = auto()
     COMMAND_RECEIVED = auto()
     
-    # Состояние
+    # State
     STATE_CHANGED = auto()
     DIALOG_MODE_ENTERED = auto()
     DIALOG_MODE_EXITED = auto()
@@ -58,12 +58,12 @@ class EventType(Enum):
     SPEAKER_IDENTIFIED = auto()
     SPEAKER_BLOCKED = auto()
     
-    # Ошибки
+    # Errors
     ERROR_TRANSCRIPTION = auto()
     ERROR_TTS = auto()
     ERROR_LLM = auto()
     
-    # Системные
+    # System
     SYSTEM_STARTUP = auto()
     SYSTEM_SHUTDOWN = auto()
     CONFIG_RELOADED = auto()
@@ -71,7 +71,7 @@ class EventType(Enum):
 
 @dataclass
 class Event:
-    """Событие в системе."""
+    """System event."""
     type: EventType
     payload: Dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
@@ -79,7 +79,7 @@ class Event:
     source: str = "unknown"
     
     def get(self, key: str, default=None):
-        """Получить значение из payload."""
+        """Get value from payload."""
         return self.payload.get(key, default)
     
     def __repr__(self):
@@ -87,7 +87,7 @@ class Event:
 
 
 class EventHandler:
-    """Обёртка для обработчика событий с приоритетом и фильтрами."""
+    """Wrapper for event handler with priority and filters."""
     
     def __init__(
         self,
@@ -104,7 +104,7 @@ class EventHandler:
         self.total_time = 0.0
     
     def can_handle(self, event: Event) -> bool:
-        """Проверяет, может ли обработчик обработать событие."""
+        """Check if handler can handle the event."""
         if self.filter_func is None:
             return True
         try:
@@ -114,7 +114,7 @@ class EventHandler:
             return False
     
     def handle(self, event: Event):
-        """Вызывает обработчик."""
+        """Invoke the handler."""
         start = time.time()
         try:
             self.callback(event)
@@ -127,15 +127,15 @@ class EventHandler:
     
     @property
     def avg_time(self) -> float:
-        """Среднее время выполнения."""
+        """Average execution time."""
         return self.total_time / max(1, self.call_count)
 
 
 class EventBus:
     """
-    Центральная шина событий.
-    
-    Паттерн Pub/Sub для loose coupling компонентов.
+    Central event bus.
+
+    Pub/Sub pattern for loose coupling of components.
     """
     
     def __init__(self, max_queue_size: int = 1000, num_workers: int = 2):
@@ -146,20 +146,20 @@ class EventBus:
         self._running = False
         self._stop_event = threading.Event()
         
-        # Статистика
+        # Statistics
         self._events_published = 0
         self._events_processed = 0
         self._events_dropped = 0
         self._event_times: Dict[EventType, List[float]] = defaultdict(list)
         
-        # История (для отладки)
+        # History (for debugging)
         self._history: List[Event] = []
         self._max_history = 100
         
         self._lock = threading.RLock()
     
     def start(self):
-        """Запускает обработку событий."""
+        """Start event processing."""
         if self._running:
             return
         
@@ -178,14 +178,14 @@ class EventBus:
         kiwi_log("EVENT_BUS", f"Started with {self._num_workers} workers")
     
     def stop(self):
-        """Останавливает обработку событий."""
+        """Stop event processing."""
         if not self._running:
             return
         
         self._running = False
         self._stop_event.set()
         
-        # Добавляем пустые события чтобы разблокировать worker'ы
+        # Add empty events to unblock workers
         for _ in range(self._num_workers):
             try:
                 self._event_queue.put(None, block=False)
@@ -199,11 +199,11 @@ class EventBus:
         kiwi_log("EVENT_BUS", "Stopped")
     
     def _worker_loop(self):
-        """Цикл обработки событий worker'ом."""
+        """Worker event processing loop."""
         while not self._stop_event.is_set():
             try:
                 event = self._event_queue.get(timeout=0.1)
-                if event is None:  # Сигнал остановки
+                if event is None:  # Stop signal
                     break
                 
                 self._process_event(event)
@@ -214,13 +214,13 @@ class EventBus:
                 kiwi_log("EVENT_BUS", f"Worker error: {e}", level="ERROR")
     
     def _process_event(self, event: Event):
-        """Обрабатывает одно событие."""
+        """Process a single event."""
         start_time = time.time()
         
         with self._lock:
             handlers = list(self._handlers.get(event.type, []))
         
-        # Сортируем по приоритету (выше = раньше)
+        # Sort by priority (higher = earlier)
         handlers.sort(key=lambda h: h.priority, reverse=True)
         
         for handler in handlers:
@@ -228,17 +228,17 @@ class EventBus:
                 continue
             
             if handler.async_mode:
-                # Асинхронная обработка в отдельном потоке
+                # Asynchronous processing in a separate thread
                 threading.Thread(
                     target=handler.handle,
                     args=(event,),
                     daemon=True
                 ).start()
             else:
-                # Синхронная обработка
+                # Synchronous processing
                 handler.handle(event)
         
-        # Статистика
+        # Statistics
         processing_time = time.time() - start_time
         with self._lock:
             self._events_processed += 1
@@ -246,7 +246,7 @@ class EventBus:
             if len(self._event_times[event.type]) > 100:
                 self._event_times[event.type] = self._event_times[event.type][-50:]
             
-            # История
+            # History
             self._history.append(event)
             if len(self._history) > self._max_history:
                 self._history = self._history[-self._max_history:]
@@ -259,16 +259,16 @@ class EventBus:
         wait: bool = False
     ) -> Optional[Event]:
         """
-        Публикует событие в шину.
-        
+        Publish event to the bus.
+
         Args:
-            event_type: Тип события
-            payload: Данные события
-            source: Источник события
-            wait: Если True, ждёт обработки (для критических событий)
-        
+            event_type: Event type
+            payload: Event data
+            source: Event source
+            wait: If True, waits for processing (for critical events)
+
         Returns:
-            Созданное событие (если wait=True) или None
+            Created event (if wait=True) or None
         """
         event = Event(
             type=event_type,
@@ -278,11 +278,11 @@ class EventBus:
         
         try:
             if wait:
-                # Синхронная публикация
+                # Synchronous publishing
                 self._process_event(event)
                 return event
             else:
-                # Асинхронная публикация
+                # Asynchronous publishing
                 self._event_queue.put(event, block=False)
                 with self._lock:
                     self._events_published += 1
@@ -303,17 +303,17 @@ class EventBus:
         async_mode: bool = True
     ) -> str:
         """
-        Подписывает обработчик на событие.
-        
+        Subscribe a handler to an event.
+
         Args:
-            event_type: Тип события
-            callback: Функция-обработчик
-            priority: Приоритет (выше = раньше вызывается)
-            filter_func: Фильтр событий
-            async_mode: Асинхронная обработка
-        
+            event_type: Event type
+            callback: Handler function
+            priority: Priority (higher = called earlier)
+            filter_func: Event filter
+            async_mode: Asynchronous processing
+
         Returns:
-            ID подписки (для отписки)
+            Subscription ID (for unsubscribing)
         """
         handler = EventHandler(callback, priority, filter_func, async_mode)
         
@@ -332,7 +332,7 @@ class EventBus:
         priority: int = 0,
         async_mode: bool = True
     ) -> List[str]:
-        """Подписывает один обработчик на несколько событий."""
+        """Subscribe a single handler to multiple events."""
         ids = []
         for event_type in event_types:
             handler_id = self.subscribe(event_type, callback, priority, async_mode=async_mode)
@@ -340,7 +340,7 @@ class EventBus:
         return ids
     
     def unsubscribe(self, event_type: EventType, handler_id: str) -> bool:
-        """Отписывает обработчик."""
+        """Unsubscribe a handler."""
         with self._lock:
             handlers = self._handlers.get(event_type, [])
             for handler in handlers:
@@ -350,7 +350,7 @@ class EventBus:
         return False
     
     def get_stats(self) -> Dict[str, Any]:
-        """Возвращает статистику шины."""
+        """Return bus statistics."""
         with self._lock:
             avg_times = {
                 event_type.name: sum(times) / len(times)
@@ -374,23 +374,23 @@ class EventBus:
             }
     
     def get_recent_events(self, count: int = 10) -> List[Event]:
-        """Возвращает последние события."""
+        """Return recent events."""
         with self._lock:
             return self._history[-count:]
     
     def clear_history(self):
-        """Очищает историю событий."""
+        """Clear event history."""
         with self._lock:
             self._history.clear()
 
 
-# Глобальный экземпляр шины событий
+# Global event bus instance
 _event_bus_instance: Optional[EventBus] = None
 _event_bus_lock = threading.Lock()
 
 
 def get_event_bus() -> EventBus:
-    """Возвращает глобальный экземпляр шины событий (singleton)."""
+    """Return global event bus instance (singleton)."""
     global _event_bus_instance
     
     if _event_bus_instance is None:
@@ -407,7 +407,7 @@ def publish(
     source: str = "unknown",
     wait: bool = False
 ) -> Optional[Event]:
-    """Удобная функция для публикации событий."""
+    """Convenience function for publishing events."""
     return get_event_bus().publish(event_type, payload, source, wait)
 
 
@@ -417,17 +417,17 @@ def subscribe(
     priority: int = 0,
     async_mode: bool = True
 ) -> str:
-    """Удобная функция для подписки на события."""
+    """Convenience function for subscribing to events."""
     return get_event_bus().subscribe(event_type, callback, priority, async_mode=async_mode)
 
 
-# Примеры использования
+# Usage examples
 def example_usage():
-    """Пример использования шины событий."""
+    """Example of event bus usage."""
     bus = EventBus()
     bus.start()
     
-    # Подписываемся на события
+    # Subscribe to events
     def on_speech_started(event: Event):
         print(f"Speech started at {event.timestamp}")
     
@@ -438,11 +438,11 @@ def example_usage():
     bus.subscribe(EventType.SPEECH_STARTED, on_speech_started, priority=10)
     bus.subscribe(EventType.COMMAND_RECEIVED, on_command)
     
-    # Публикуем события
+    # Publish events
     bus.publish(EventType.SPEECH_STARTED, {'volume': 0.5}, source="listener")
     bus.publish(EventType.COMMAND_RECEIVED, {'command': 'привет'}, source="listener")
     
-    # Статистика
+    # Statistics
     print(f"\nStats: {bus.get_stats()}")
     
     time.sleep(1)

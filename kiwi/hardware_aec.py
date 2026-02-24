@@ -1,12 +1,12 @@
 """
 Hardware AEC (Acoustic Echo Cancellation) Module
 
-Предоставляет аппаратное подавление эха через:
+Provides hardware echo cancellation via:
 - Windows: WASAPI AEC (Acoustic Echo Cancellation)
 - Linux: PulseAudio/PipeWire echo-cancel module
 - macOS: Voice Processing I/O mode
 
-С fallback на программное AEC если аппаратное недоступно.
+With fallback to software AEC if hardware is unavailable.
 """
 
 import os
@@ -25,30 +25,30 @@ from kiwi.utils import kiwi_log
 
 @dataclass
 class AECConfig:
-    """Конфигурация AEC."""
+    """AEC configuration."""
     enabled: bool = True
-    use_hardware: bool = True  # Пытаться использовать аппаратное AEC
-    fallback_to_software: bool = True  # Fallback на программное
-    
-    # Параметры программного AEC (SpeexDSP или аналог)
-    filter_length_ms: int = 250  # Длина фильтра в мс
-    echo_delay_ms: int = 100   # Задержка эха в мс
-    
-    # Параметры шумоподавления
+    use_hardware: bool = True  # Try to use hardware AEC
+    fallback_to_software: bool = True  # Fallback to software
+
+    # Software AEC parameters (SpeexDSP or similar)
+    filter_length_ms: int = 250  # Filter length in ms
+    echo_delay_ms: int = 100   # Echo delay in ms
+
+    # Noise suppression parameters
     noise_suppression: bool = True
     ns_level: int = -30  # dB
     
-    # Автоматическая регулировка усиления
+    # Automatic gain control
     agc: bool = True
     agc_target: float = 0.5
 
 
 class HardwareAEC:
     """
-    Менеджер аппаратного AEC.
-    
-    Пытается использовать встроенное аппаратное подавление эха,
-    с fallback на программное решение.
+    Hardware AEC manager.
+
+    Attempts to use built-in hardware echo cancellation,
+    with fallback to a software solution.
     """
     
     def __init__(self, config: Optional[AECConfig] = None):
@@ -59,19 +59,19 @@ class HardwareAEC:
         self._aec_device_id: Optional[int] = None
         self._aec_device_name: Optional[str] = None
         
-        # Программный AEC (fallback)
+        # Software AEC (fallback)
         self._software_aec = None
         self._use_software_aec = False
         
-        # Буферы для программного AEC
+        # Buffers for software AEC
         self._echo_buffer = deque(maxlen=1000)  # ~3 секунды при 16kHz
         self._reference_buffer = deque(maxlen=1000)
         
-        # Для корреляционного анализа
+        # For correlation analysis
         self._last_played_audio: Optional[np.ndarray] = None
         self._correlation_threshold = 0.6
         
-        # Статистика
+        # Statistics
         self._frames_processed = 0
         self._echo_cancelled_frames = 0
         
@@ -79,7 +79,7 @@ class HardwareAEC:
             self._initialize()
     
     def _initialize(self):
-        """Инициализация AEC."""
+        """Initialize AEC."""
         kiwi_log("AEC", "Initializing...")
         
         if self.config.use_hardware:
@@ -94,7 +94,7 @@ class HardwareAEC:
             kiwi_log("AEC", "AEC disabled (hardware unavailable, fallback disabled)")
     
     def _check_hardware_aec(self) -> bool:
-        """Проверяет доступность аппаратного AEC."""
+        """Check hardware AEC availability."""
         if self.platform == 'windows':
             return self._check_windows_aec()
         elif self.platform == 'linux':
@@ -104,17 +104,17 @@ class HardwareAEC:
         return False
     
     def _check_windows_aec(self) -> bool:
-        """Проверяет WASAPI AEC на Windows."""
+        """Check WASAPI AEC on Windows."""
         try:
             import sounddevice as sd
             
-            # Ищем устройства с поддержкой AEC
+            # Search for devices with AEC support
             devices = sd.query_devices()
             
             for i, device in enumerate(devices):
                 if device['max_input_channels'] > 0:  # Input device
                     name = device['name'].lower()
-                    # Признаки AEC-устройств
+                    # AEC device indicators
                     aec_keywords = [
                         'aec', 'echo', 'communication', 'communications',
                         'hands-free', 'handsfree', 'agc', 'noise',
@@ -127,21 +127,21 @@ class HardwareAEC:
                         kiwi_log("AEC", f"Found Windows AEC device: {device['name']} (id={i})")
                         return True
             
-            # Проверяем наличие Communications устройств
+            # Check for Communications devices
             try:
                 import comtypes
                 from comtypes import CLSCTX_ALL
                 
-                # Пытаемся получить доступ к Core Audio API
-                # Это требует pycaw: pip install pycaw
+                # Try to access Core Audio API
+                # This requires pycaw: pip install pycaw
                 try:
                     from pycaw.pycaw import AudioUtilities
                     
-                    # Получаем default communication device
+                    # Get default communication device
                     comm_device = AudioUtilities.GetSpeakers()
                     if comm_device:
                         kiwi_log("AEC", f"Default communication device: {comm_device.FriendlyName}")
-                        # Communications устройства обычно имеют встроенный AEC
+                        # Communications devices usually have built-in AEC
                         return True
                         
                 except ImportError:
@@ -157,9 +157,9 @@ class HardwareAEC:
             return False
     
     def _check_linux_aec(self) -> bool:
-        """Проверяет PulseAudio/PipeWire AEC на Linux."""
+        """Check PulseAudio/PipeWire AEC on Linux."""
         try:
-            # Проверяем наличие echo-cancel модуля
+            # Check for echo-cancel module
             result = subprocess.run(
                 ['pactl', 'list', 'modules'],
                 capture_output=True,
@@ -171,7 +171,7 @@ class HardwareAEC:
                 kiwi_log("AEC", "PulseAudio echo-cancel module loaded")
                 return True
             
-            # Проверяем PipeWire
+            # Check PipeWire
             result = subprocess.run(
                 ['pw-cli', 'ls', 'Node'],
                 capture_output=True,
@@ -183,7 +183,7 @@ class HardwareAEC:
                 kiwi_log("AEC", "PipeWire AEC found")
                 return True
             
-            # Пытаемся загрузить модуль
+            # Try to load the module
             try:
                 subprocess.run(
                     ['pactl', 'load-module', 'module-echo-cancel'],
@@ -202,12 +202,12 @@ class HardwareAEC:
             return False
     
     def _check_macos_aec(self) -> bool:
-        """Проверяет Voice Processing IO на macOS."""
+        """Check Voice Processing IO on macOS."""
         try:
-            # На macOS AEC обычно доступен через CoreAudio
-            # с установленным флагом kAudioUnitProperty_VoiceProcessingIO
-            
-            # Проверяем наличие аудиоустройств с voice processing
+            # On macOS, AEC is usually available via CoreAudio
+            # with the kAudioUnitProperty_VoiceProcessingIO flag set
+
+            # Check for audio devices with voice processing
             result = subprocess.run(
                 ['system_profiler', 'SPAudioDataType'],
                 capture_output=True,
@@ -216,7 +216,7 @@ class HardwareAEC:
             )
             
             if 'built-in' in result.stdout.lower() or 'microphone' in result.stdout.lower():
-                # Встроенные микрофоны Mac обычно имеют AEC
+                # Built-in Mac microphones usually have AEC
                 kiwi_log("AEC", "macOS built-in audio detected (likely has AEC)")
                 return True
             
@@ -227,9 +227,9 @@ class HardwareAEC:
             return False
     
     def _initialize_software_aec(self):
-        """Инициализирует программный AEC."""
+        """Initialize software AEC."""
         try:
-            # Пробуем использовать speexdsp
+            # Try using speexdsp
             import speexdsp
             
             self._software_aec = speexdsp.EchoCanceller(
@@ -253,25 +253,25 @@ class HardwareAEC:
         reference_audio: Optional[np.ndarray] = None
     ) -> np.ndarray:
         """
-        Обрабатывает аудио с микрофона, применяя AEC.
-        
+        Process microphone audio, applying AEC.
+
         Args:
-            mic_audio: Аудио с микрофона
-            reference_audio: Ссылочное аудио (то, что воспроизводится)
-        
+            mic_audio: Microphone audio
+            reference_audio: Reference audio (what is being played)
+
         Returns:
-            Аудио с подавленным эхом
+            Audio with echo suppressed
         """
         self._frames_processed += 1
         
         if not self.config.enabled:
             return mic_audio
         
-        # Если используется аппаратное AEC - просто возвращаем аудио
+        # If hardware AEC is used - just return the audio
         if self._hardware_aec_available:
             return mic_audio
         
-        # Программное AEC
+        # Software AEC
         if self._use_software_aec:
             return self._process_software_aec(mic_audio, reference_audio)
         
@@ -282,19 +282,19 @@ class HardwareAEC:
         mic_audio: np.ndarray,
         reference_audio: Optional[np.ndarray]
     ) -> np.ndarray:
-        """Программное подавление эха."""
-        # SpeexDSP метод
+        """Software echo suppression."""
+        # SpeexDSP method
         if self._software_aec is not None:
             try:
                 if reference_audio is not None:
-                    # Нужно выровнять длину
+                    # Need to align lengths
                     min_len = min(len(mic_audio), len(reference_audio))
                     mic = mic_audio[:min_len]
                     ref = reference_audio[:min_len]
                     
                     processed = self._software_aec.process(mic, ref)
                     
-                    # Дополняем если нужно
+                    # Pad if needed
                     if len(processed) < len(mic_audio):
                         processed = np.concatenate([processed, mic_audio[len(processed):]])
                     
@@ -303,7 +303,7 @@ class HardwareAEC:
             except Exception as e:
                 kiwi_log("AEC", f"SpeexDSP error: {e}", level="ERROR")
         
-        # Fallback: корреляционный метод
+        # Fallback: correlation method
         if reference_audio is not None:
             return self._correlation_cancel(mic_audio, reference_audio)
         
@@ -315,28 +315,28 @@ class HardwareAEC:
         reference_audio: np.ndarray
     ) -> np.ndarray:
         """
-        Простое корреляционное подавление эха.
-        
-        Ищет сегменты микрофонного аудио, которые коррелируют
-        с воспроизводимым аудио, и подавляет их.
+        Simple correlation-based echo cancellation.
+
+        Finds segments of microphone audio that correlate
+        with played audio and suppresses them.
         """
         try:
-            # Нормализуем
+            # Normalize
             mic_norm = mic_audio / (np.max(np.abs(mic_audio)) + 1e-10)
             ref_norm = reference_audio / (np.max(np.abs(reference_audio)) + 1e-10)
             
-            # Вычисляем корреляцию
+            # Compute correlation
             min_len = min(len(mic_norm), len(ref_norm))
             correlation = np.corrcoef(mic_norm[:min_len], ref_norm[:min_len])[0, 1]
             
             if np.isnan(correlation):
                 correlation = 0.0
             
-            # Если корреляция высокая - это эхо
+            # If correlation is high - it's echo
             if correlation > self._correlation_threshold:
-                # Подавляем на основе корреляции
+                # Suppress based on correlation
                 suppression = (correlation - self._correlation_threshold) / (1 - self._correlation_threshold)
-                suppression = np.clip(suppression, 0, 0.9)  # Максимум 90% подавления
+                suppression = np.clip(suppression, 0, 0.9)  # Maximum 90% suppression
                 
                 processed = mic_audio * (1 - suppression)
                 self._echo_cancelled_frames += 1
@@ -353,33 +353,33 @@ class HardwareAEC:
     
     def update_reference(self, audio: np.ndarray):
         """
-        Обновляет ссылочное аудио (то, что воспроизводится через колонки).
-        
+        Update reference audio (what is being played through speakers).
+
         Args:
-            audio: Аудио, которое будет воспроизведено
+            audio: Audio that will be played
         """
         if not self.config.enabled or self._hardware_aec_available:
             return
         
         self._last_played_audio = audio.copy()
         
-        # Добавляем в буфер для программного AEC
+        # Add to buffer for software AEC
         self._reference_buffer.extend(audio)
     
     def get_aec_device(self) -> Optional[int]:
-        """Возвращает ID устройства с аппаратным AEC."""
+        """Return the device ID with hardware AEC."""
         return self._aec_device_id if self._hardware_aec_available else None
     
     def is_hardware_aec(self) -> bool:
-        """Возвращает True, если используется аппаратное AEC."""
+        """Return True if hardware AEC is being used."""
         return self._hardware_aec_available
     
     def is_software_aec(self) -> bool:
-        """Возвращает True, если используется программное AEC."""
+        """Return True if software AEC is being used."""
         return self._use_software_aec and not self._hardware_aec_available
     
     def get_stats(self) -> dict:
-        """Возвращает статистику AEC."""
+        """Return AEC statistics."""
         return {
             'hardware_available': self._hardware_aec_available,
             'hardware_device': self._aec_device_name,
@@ -390,7 +390,7 @@ class HardwareAEC:
         }
     
     def reset(self):
-        """Сбрасывает состояние AEC."""
+        """Reset AEC state."""
         self._echo_buffer.clear()
         self._reference_buffer.clear()
         self._last_played_audio = None
@@ -405,7 +405,7 @@ class HardwareAEC:
 
 
 def create_aec_from_config(config_path: str = "config.yaml") -> HardwareAEC:
-    """Создает AEC из конфигурации YAML."""
+    """Create AEC from YAML configuration."""
     config = AECConfig()
     
     try:
@@ -432,7 +432,7 @@ def create_aec_from_config(config_path: str = "config.yaml") -> HardwareAEC:
     return HardwareAEC(config)
 
 
-# Для тестирования
+# For testing
 if __name__ == "__main__":
     print("Testing Hardware AEC module...")
     
@@ -443,20 +443,20 @@ if __name__ == "__main__":
     for key, value in stats.items():
         print(f"  {key}: {value}")
     
-    # Тестовое аудио
+    # Test audio
     sample_rate = 16000
     duration = 1.0
     t = np.linspace(0, duration, int(sample_rate * duration))
     
-    # Симулируем микрофон (эхо + речь)
-    echo = np.sin(2 * np.pi * 440 * t) * 0.3  # Эхо от колонок
-    speech = np.sin(2 * np.pi * 1000 * t) * 0.5  # Речь пользователя
+    # Simulate microphone (echo + speech)
+    echo = np.sin(2 * np.pi * 440 * t) * 0.3  # Echo from speakers
+    speech = np.sin(2 * np.pi * 1000 * t) * 0.5  # User speech
     mic_signal = echo + speech
     
-    # Ссылочное аудио (то, что воспроизводится)
+    # Reference audio (what is being played)
     reference = np.sin(2 * np.pi * 440 * t) * 0.8
     
-    # Обрабатываем
+    # Process
     aec.update_reference(reference)
     processed = aec.process(mic_signal, reference)
     

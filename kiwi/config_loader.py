@@ -17,7 +17,7 @@ from kiwi.tts.elevenlabs import (
 
 
 def load_config_yaml(config_path: str = "config.yaml") -> dict:
-    """Загружает конфигурацию из YAML файла."""
+    """Load configuration from a YAML file."""
     import yaml
     if os.path.exists(config_path):
         try:
@@ -29,7 +29,7 @@ def load_config_yaml(config_path: str = "config.yaml") -> dict:
 
 
 def check_cuda_available() -> bool:
-    """Проверяет доступность CUDA для Whisper."""
+    """Check CUDA availability for Whisper."""
     try:
         import torch
         return torch.cuda.is_available()
@@ -40,23 +40,16 @@ def check_cuda_available() -> bool:
 @dataclass
 class KiwiConfig:
     openclaw_bin: str = "openclaw"
-    """Конфигурация сервиса Киви."""
-    openclaw_session_id: str = "kiwi-voice"  # Отдельная сессия для голоса
+    """Kiwi service configuration."""
+    openclaw_session_id: str = "kiwi-voice"  # Separate session for voice
     openclaw_agent: Optional[str] = None
     openclaw_timeout: int = 120
 
-    # Voice system prompt - задаётся при первом подключении
-    voice_system_prompt: str = """Ты — голосовой ассистент Киви.
+    # Language / i18n — controls UI strings, STT locale, TTS locale
+    language: str = "ru"
 
-Правила для голосового режима:
-1. Отвечай кратко, но ЗАВЕРШЁННО. Лучше завершённо, чем неполно.
-2. Будь дружелюбной и эмоциональной
-3. Если нужно выполнить сложную задачу — сделай это, но сообщи о результате кратко
-4. Если выполняешь длительную задачу (>30 секунд) — периодически описывай что делаешь, чтобы пользователь понимал прогресс
-5. Используй общую память с основной сессией (консолью)
-6. Если не уверена — переспроси
-
-Контекст: пользователь говорит голосом, ответ будет озвучен через TTS."""
+    # Voice system prompt - set on first connection (populated from i18n if empty)
+    voice_system_prompt: str = ""
 
     # LLM settings
     llm_model: str = "openrouter/moonshotai/kimi-k2.5"
@@ -146,8 +139,11 @@ class KiwiConfig:
 
     @classmethod
     def from_yaml(cls, yaml_config: dict) -> "KiwiConfig":
-        """Создает конфиг из YAML + env vars."""
+        """Create config from YAML + env vars."""
         config = cls()
+
+        # Language / i18n
+        config.language = str(yaml_config.get("language", config.language)).strip() or "ru"
 
         stt_cfg = yaml_config.get("stt", {})
         tts_cfg = yaml_config.get("tts", {})
@@ -308,6 +304,9 @@ class KiwiConfig:
         config.ws_ping_interval = float(ws_cfg.get("ping_interval", config.ws_ping_interval))
         config.ws_ping_timeout = float(ws_cfg.get("ping_timeout", config.ws_ping_timeout))
 
+        if os.getenv("KIWI_LANGUAGE"):
+            config.language = os.getenv("KIWI_LANGUAGE").strip() or "ru"
+
         if os.getenv("RUNPOD_TTS_ENDPOINT_ID"):
             config.tts_endpoint_id = os.getenv("RUNPOD_TTS_ENDPOINT_ID")
         if os.getenv("RUNPOD_API_KEY"):
@@ -443,10 +442,21 @@ class KiwiConfig:
         if config.stt_device == "cuda" and not check_cuda_available():
             kiwi_log("CONFIG", "Requested CUDA for STT, but CUDA not available! Falling back to CPU", level="WARNING")
             config.stt_device = "cpu"
-            # float16 не работает на CPU, используем int8
+            # float16 does not work on CPU, use int8
             if config.stt_compute_type == "float16":
                 kiwi_log("CONFIG", "Changing compute_type from float16 to int8 for CPU compatibility", level="INFO")
                 config.stt_compute_type = "int8"
+
+        # Populate voice_system_prompt from i18n if not set by YAML/env
+        if not config.voice_system_prompt:
+            try:
+                from kiwi.i18n import setup as _i18n_setup, t as _t
+                _i18n_setup(config.language)
+                prompt = _t("system.voice_prompt")
+                if prompt != "system.voice_prompt":  # key exists in locale
+                    config.voice_system_prompt = prompt
+            except Exception:
+                pass
 
         return config
 

@@ -2,11 +2,11 @@
 """
 Voice Security - Telegram Approval + Dangerous Command Detection
 
-Функции:
-- Определение опасных команд по паттернам
-- Telegram approval с inline keyboard (approve/deny)
-- Кэширование ожидающих подтверждений
-- Fallback на лог-файл если Telegram недоступен
+Features:
+- Dangerous command detection via regex patterns
+- Telegram approval with inline keyboard (approve/deny)
+- Caching of pending approvals
+- Fallback to log file when Telegram is unavailable
 """
 
 import os
@@ -23,84 +23,85 @@ from datetime import datetime
 import requests
 
 from kiwi.utils import kiwi_log
+from kiwi.i18n import t
 
-# Конфигурация
+# Configuration
 TELEGRAM_BOT_TOKEN = os.getenv("KIWI_TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("KIWI_TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID", "")
 
 
 class CommandType(Enum):
-    """Типы команд по уровню опасности."""
-    SAFE = 0           # Безопасные команды
-    WARNING = 1        # Требуют внимания
-    DANGEROUS = 2      # Требуют подтверждения
-    CRITICAL = 3       # Требуют явного подтверждения
+    """Command types by danger level."""
+    SAFE = 0           # Safe commands
+    WARNING = 1        # Require attention
+    DANGEROUS = 2      # Require approval
+    CRITICAL = 3       # Require explicit approval
 
 
 @dataclass
 class PendingApproval:
-    """Ожидающее подтверждение."""
+    """Pending approval."""
     command: str
     speaker_id: str
     speaker_name: str
     timestamp: float
-    callback_data: str  # unique ID для callback
+    callback_data: str  # unique ID for callback
     
     def is_expired(self, timeout: int = 60) -> bool:
-        """Проверяет истечение таймаута."""
+        """Check if the timeout has expired."""
         return time.time() - self.timestamp > timeout
 
 
 class DangerousCommandDetector:
     """
-    Детектор опасных команд на основе регулярных выражений.
-    
-    Проверяет команды перед выполнением и отправляет в Telegram
-    на подтверждение если это опасная команда от не-Owner.
+    Dangerous command detector based on regular expressions.
+
+    Checks commands before execution and sends them to Telegram
+    for approval if it is a dangerous command from a non-Owner.
     """
-    
-    # Паттерны опасных команд
+
+    # Dangerous command patterns
     DANGEROUS_PATTERNS = [
-        # Удаление файлов/папок
+        # File/folder deletion
         (CommandType.CRITICAL, r"удали?\s+(вс[её]|все|файлы?|папк[уаи]?|директорию|каталог)"),
         (CommandType.CRITICAL, r"delete\s+(all|files?|folder|directory)"),
         (CommandType.CRITICAL, r"rm\s+(-rf|/r|/f|rf)"),
         (CommandType.CRITICAL, r"format\s+[a-zA-Z]:"),
         
-        # Выключение/перезагрузка
+        # Shutdown/reboot
         (CommandType.CRITICAL, r"выключи?\s+(компьютер|писи|windows|систему)"),
         (CommandType.CRITICAL, r"shutdown\s+(-h|-s|/s|/h)"),
         (CommandType.CRITICAL, r"перезагруз[и|ка]|restart|reboot"),
         (CommandType.CRITICAL, r"выключи.*сейчас|shutdown\s+now"),
         
-        # Системные команды
+        # System commands
         (CommandType.DANGEROUS, r"sudo\s+"),
         (CommandType.DANGEROUS, r"chmod\s+777|chmod\s+-R"),
         (CommandType.DANGEROUS, r"systemctl\s+(stop|disable|kill)"),
         (CommandType.DANGEROUS, r"net\s+stop"),
         
-        # Пароли/секреты
+        # Passwords/secrets
         (CommandType.CRITICAL, r"отправь?\s+(пароль|пароли|ключ|токен|секрет|секреты)"),
         (CommandType.CRITICAL, r"покажи?\s+(пароль|ключ|токен)"),
         (CommandType.CRITICAL, r"send\s+(password|key|token|secret)"),
         (CommandType.CRITICAL, r"скажи?\s+(пароль|пароли|код|пин)"),
         
-        # Установка неизвестного ПО
+        # Installation of unknown software
         (CommandType.DANGEROUS, r"установи?\s+(неизвест|незнаком)"),
         (CommandType.DANGEROUS, r"install\s+(unknown|untrusted)"),
         (CommandType.DANGEROUS, r"скачай?\s+(исполни|вирус|троян)"),
         
-        # Изменение системы
+        # System modification
         (CommandType.WARNING, r"измени?\s+(настройк[иа]|конфиг|config)"),
         (CommandType.WARNING, r"настрой?\s+(систему|сервер|nginx|apache)"),
         (CommandType.WARNING, r"change\s+(settings?|config)"),
         
-        # Сетевые операции
+        # Network operations
         (CommandType.WARNING, r"открой?\s+(порты?|port)"),
         (CommandType.WARNING, r"закрыть?\s+(порты?|port|firewall)"),
         (CommandType.WARNING, r"ping\s+-t"),
         
-        # Файловые операции
+        # File operations
         (CommandType.WARNING, r"перемести?\s+(файл|папку)"),
         (CommandType.WARNING, r"move\s+(file|folder)"),
         (CommandType.WARNING, r"скопируй|copy"),
@@ -108,19 +109,37 @@ class DangerousCommandDetector:
     
     def __init__(self):
         self._patterns = []
-        for cmd_type, pattern in self.DANGEROUS_PATTERNS:
-            try:
-                self._patterns.append((cmd_type, re.compile(pattern, re.IGNORECASE)))
-            except re.error as e:
-                kiwi_log("VOICE_SECURITY", f"Invalid pattern '{pattern}': {e}", level="ERROR")
+        locale_patterns = t("security_patterns")
+        if isinstance(locale_patterns, dict):
+            level_map = {
+                "critical": CommandType.CRITICAL,
+                "dangerous": CommandType.DANGEROUS,
+                "warning": CommandType.WARNING,
+            }
+            for level_name, patterns in locale_patterns.items():
+                level = level_map.get(level_name)
+                if level is None:
+                    continue
+                for p in patterns:
+                    try:
+                        self._patterns.append((level, re.compile(p, re.IGNORECASE)))
+                    except re.error as e:
+                        kiwi_log("VOICE_SECURITY", f"Invalid locale pattern '{p}': {e}", level="ERROR")
+        else:
+            # Fallback to hardcoded patterns
+            for cmd_type, pattern in self.DANGEROUS_PATTERNS:
+                try:
+                    self._patterns.append((cmd_type, re.compile(pattern, re.IGNORECASE)))
+                except re.error as e:
+                    kiwi_log("VOICE_SECURITY", f"Invalid pattern '{pattern}': {e}", level="ERROR")
     
     def analyze(self, command: str) -> Tuple[CommandType, Optional[str]]:
         """
-        Анализирует команду на опасность.
-        
+        Analyze a command for danger level.
+
         Args:
-            command: Текст команды
-            
+            command: Command text
+
         Returns:
             (CommandType, matched_pattern)
         """
@@ -134,42 +153,42 @@ class DangerousCommandDetector:
     
     def is_approval_required(self, command_type: CommandType, is_owner: bool) -> bool:
         """
-        Проверяет, нужно ли подтверждение.
-        
+        Check whether approval is required.
+
         Args:
-            command_type: Тип команды
-            is_owner: Это ли владелец
-            
+            command_type: Type of command
+            is_owner: Whether the speaker is the owner
+
         Returns:
-            True если нужно подтверждение
+            True if approval is required
         """
         if is_owner:
-            # Owner может выполнять критические команды без подтверждения
+            # Owner can execute critical commands without approval
             return False
-        
-        # Не-owner требует подтверждения на DANGEROUS и CRITICAL
+
+        # Non-owner requires approval for DANGEROUS and CRITICAL
         return command_type in (CommandType.DANGEROUS, CommandType.CRITICAL)
     
     def get_warning_message(self, command_type: CommandType) -> str:
-        """Возвращает предупреждение по типу команды."""
+        """Return a warning message for the given command type."""
         messages = {
-            CommandType.SAFE: "✅ Безопасная команда",
-            CommandType.WARNING: "⚠️ Команда требует внимания",
-            CommandType.DANGEROUS: "🚨 Опасная команда!",
-            CommandType.CRITICAL: "⛔ КРИТИЧЕСКАЯ команда!",
+            CommandType.SAFE: t("security.safe"),
+            CommandType.WARNING: t("security.warning"),
+            CommandType.DANGEROUS: t("security.dangerous"),
+            CommandType.CRITICAL: t("security.critical"),
         }
-        return messages.get(command_type, "❓ Неизвестный уровень опасности")
+        return messages.get(command_type, t("security.unknown_level"))
 
 
 class TelegramApprovalClient:
     """
-    Клиент для отправки запросов на подтверждение в Telegram.
-    
-    Использует Telegram Bot API с inline keyboard.
+    Client for sending approval requests to Telegram.
+
+    Uses Telegram Bot API with inline keyboard.
     """
     
     API_URL = "https://api.telegram.org/bot{}/".format(TELEGRAM_BOT_TOKEN)
-    APPROVAL_TIMEOUT = 60  # секунд
+    APPROVAL_TIMEOUT = 60  # seconds
     
     def __init__(self, bot_token: str = None, chat_id: str = None):
         self.bot_token = bot_token or TELEGRAM_BOT_TOKEN
@@ -181,11 +200,11 @@ class TelegramApprovalClient:
         self._poll_thread: Optional[threading.Thread] = None
         
     def is_configured(self) -> bool:
-        """Проверяет настройку бота."""
+        """Check if the bot is configured."""
         return bool(self.bot_token) and bool(self.chat_id)
     
     def start(self):
-        """Запускает polling для получения ответов."""
+        """Start polling for responses."""
         if not self.is_configured():
             kiwi_log("VOICE_SECURITY", "Telegram not configured, using fallback", level="WARNING")
             return
@@ -196,14 +215,14 @@ class TelegramApprovalClient:
         kiwi_log("VOICE_SECURITY", "Telegram approval client started")
     
     def stop(self):
-        """Останавливает polling."""
+        """Stop polling."""
         self._running = False
         if self._poll_thread:
             self._poll_thread.join(timeout=2)
         kiwi_log("VOICE_SECURITY", "Telegram approval client stopped")
     
     def _poll_loop(self):
-        """Polling loop для получения callback от Inline Keyboard."""
+        """Polling loop to receive callbacks from Inline Keyboard."""
         last_offset = 0
         backoff = 5
         consecutive_errors = 0
@@ -243,7 +262,7 @@ class TelegramApprovalClient:
                 backoff = min(backoff * 2, 300)
     
     def _handle_callback(self, callback: dict):
-        """Обрабатывает нажатие кнопки."""
+        """Handle a button press callback."""
         callback_data = callback.get("data", "")
         callback_id = callback.get("id", "")
         message_id = callback.get("message", {}).get("message_id")
@@ -263,7 +282,7 @@ class TelegramApprovalClient:
                 approval = self.pending_approvals[key]
                 cb = self._callbacks.get(key)
 
-                # Удаляем из очереди
+                # Remove from the queue
                 del self.pending_approvals[key]
                 self._callbacks.pop(key, None)
             else:
@@ -285,7 +304,7 @@ class TelegramApprovalClient:
         # Answer the callback query so the button stops showing a spinner
         if callback_id:
             try:
-                answer_text = "✅ Принято!" if approved else "❌ Отклонено"
+                answer_text = t("security.telegram_approved") if approved else t("security.telegram_denied")
                 url = f"https://api.telegram.org/bot{self.bot_token}/answerCallbackQuery"
                 requests.post(url, json={
                     "callback_query_id": callback_id,
@@ -302,21 +321,21 @@ class TelegramApprovalClient:
         callback: Callable[[bool, PendingApproval], None] = None
     ) -> str:
         """
-        Отправляет запрос на подтверждение в Telegram.
-        
+        Send an approval request to Telegram.
+
         Args:
-            command: Текст команды
-            speaker_id: ID говорящего
-            speaker_name: Имя говорящего
-            callback: Функция обратного вызова (approved, approval_data)
-            
+            command: Command text
+            speaker_id: Speaker ID
+            speaker_name: Speaker name
+            callback: Callback function (approved, approval_data)
+
         Returns:
-            callback_data для отслеживания
+            callback_data for tracking
         """
-        # Генерируем уникальный ID
+        # Generate a unique ID
         callback_data = f"kiwi_{int(time.time())}"
         
-        # Создаём запись ожидания
+        # Create a pending record
         approval = PendingApproval(
             command=command,
             speaker_id=speaker_id,
@@ -330,23 +349,23 @@ class TelegramApprovalClient:
             if callback:
                 self._callbacks[callback_data] = callback
         
-        # Формируем сообщение
+        # Compose the message
         message = (
-            f"🚨 *Киви - Запрос подтверждения*\n\n"
-            f"👤 *Говорящий:* {speaker_name}\n"
+            f"{t('security.telegram_request_title')}\n\n"
+            f"{t('security.telegram_speaker_label')} {speaker_name}\n"
             f"🆔 ID: `{speaker_id}`\n\n"
-            f"📝 *Команда:*\n"
+            f"{t('security.telegram_command_label')}\n"
             f"```\n{command}\n```\n\n"
-            f"Подтвердить выполнение?"
+            f"{t('security.telegram_confirm')}"
         )
         
-        # Отправляем в Telegram
+        # Send to Telegram
         if self.is_configured():
             self._send_telegram_message(message, callback_data)
         else:
-            # Fallback - логируем
+            # Fallback - log it
             kiwi_log("VOICE_SECURITY", f"Approval request (fallback): {speaker_name} -> {command}")
-            # Автоматически approve через 5 секунд для тестирования
+            # Auto-approve after 5 seconds for testing
             if callback:
                 time.sleep(0.1)
                 callback(True, approval)
@@ -372,7 +391,7 @@ class TelegramApprovalClient:
             kiwi_log("VOICE_SECURITY", f"Telegram notification error: {e}", level="ERROR")
 
     def _send_telegram_message(self, message: str, callback_data: str):
-        """Отправляет сообщение с inline keyboard."""
+        """Send a message with inline keyboard."""
         try:
             url = self.API_URL + "sendMessage"
             data = {
@@ -381,8 +400,8 @@ class TelegramApprovalClient:
                 "parse_mode": "Markdown",
                 "reply_markup": json.dumps({
                     "inline_keyboard": [[
-                        {"text": "✅ Разрешить", "callback_data": f"{callback_data}_approve"},
-                        {"text": "❌ Запретить", "callback_data": f"{callback_data}_deny"}
+                        {"text": t("security.approve_button"), "callback_data": f"{callback_data}_approve"},
+                        {"text": t("security.deny_button"), "callback_data": f"{callback_data}_deny"}
                     ]]
                 })
             }
@@ -394,7 +413,7 @@ class TelegramApprovalClient:
             kiwi_log("VOICE_SECURITY", f"Telegram error: {e}", level="ERROR")
     
     def cleanup_expired(self):
-        """Очищает истёкшие запросы."""
+        """Clean up expired approval requests."""
         expired = []
         
         with self._lock:
@@ -411,16 +430,16 @@ class TelegramApprovalClient:
             kiwi_log("VOICE_SECURITY", f"Cleaned {len(expired)} expired approvals")
     
     def check_pending(self, callback_data: str) -> Optional[PendingApproval]:
-        """Проверяет статус ожидающего подтверждения."""
+        """Check the status of a pending approval."""
         with self._lock:
             return self.pending_approvals.get(callback_data)
 
 
 class VoiceSecurity:
     """
-    Главный класс безопасности голосовых команд.
-    
-    Объединяет:
+    Main voice command security class.
+
+    Combines:
     - DangerousCommandDetector
     - TelegramApprovalClient
     """
@@ -430,18 +449,18 @@ class VoiceSecurity:
         self.telegram = TelegramApprovalClient(bot_token, chat_id)
         self.telegram.start()
         
-        # Таймер очистки
+        # Cleanup timer
         self._cleanup_timer: Optional[threading.Timer] = None
         self._start_cleanup_timer()
     
     def _start_cleanup_timer(self):
-        """Запускает периодическую очистку."""
+        """Start periodic cleanup."""
         self._cleanup_timer = threading.Timer(30.0, self._cleanup_loop)
         self._cleanup_timer.daemon = True
         self._cleanup_timer.start()
     
     def _cleanup_loop(self):
-        """Периодическая очистка."""
+        """Periodic cleanup."""
         self.telegram.cleanup_expired()
         self._start_cleanup_timer()
     
@@ -454,37 +473,37 @@ class VoiceSecurity:
         execute_callback: Callable[[str], None] = None
     ) -> Tuple[bool, str]:
         """
-        Анализирует команду и при необходимости запрашивает подтверждение.
-        
+        Analyze a command and request approval if necessary.
+
         Args:
-            command: Текст команды
-            speaker_id: ID говорящего
-            speaker_name: Имя говорящего
-            is_owner: Это ли владелец
-            execute_callback: Вызывается при approve (command)
-            
+            command: Command text
+            speaker_id: Speaker ID
+            speaker_name: Speaker name
+            is_owner: Whether the speaker is the owner
+            execute_callback: Called on approval (command)
+
         Returns:
             (should_execute, message)
         """
-        # Анализируем на опасность
+        # Analyze for danger level
         cmd_type, pattern = self.detector.analyze(command)
         warning = self.detector.get_warning_message(cmd_type)
         
         kiwi_log("VOICE_SECURITY", f"Command analysis: type={cmd_type.name}, pattern={pattern}")
         
-        # Owner без подтверждения
+        # Owner executes without approval
         if is_owner:
             if cmd_type == CommandType.CRITICAL:
                 return True, f"{warning} (Owner - выполнено без подтверждения)"
             elif cmd_type == CommandType.DANGEROUS:
-                # Owner может выполнить, но с предупреждением
+                # Owner can execute, but with a warning
                 return True, f"{warning}"
             else:
                 return True, warning
         
-        # Не-owner требует подтверждения
+        # Non-owner requires approval
         if self.detector.is_approval_required(cmd_type, is_owner):
-            # Отправляем запрос
+            # Send approval request
             def on_approve(approved: bool, approval: PendingApproval):
                 if approved:
                     if execute_callback:
@@ -499,9 +518,9 @@ class VoiceSecurity:
                 callback=on_approve
             )
             
-            return False, f"{warning}\nОжидание подтверждения в Telegram..."
+            return False, f"{warning}\n{t('security.awaiting_approval')}"
         
-        # SAFE команды выполняются
+        # SAFE commands are executed
         return True, warning
     
     def notify(self, message: str):
@@ -509,67 +528,87 @@ class VoiceSecurity:
         self.telegram.send_notification(message)
 
     def stop(self):
-        """Останавливает все процессы."""
+        """Stop all processes."""
         if self._cleanup_timer:
             self._cleanup_timer.cancel()
         self.telegram.stop()
 
 
-# === КОМАНДЫ УПРАВЛЕНИЯ ГОЛОСАМИ ===
+# === VOICE MANAGEMENT COMMANDS ===
 
 OWNER_CONTROL_PATTERNS = {
-    # Блокировка
+    # Blocking
     r"в чёрный список|заблокируй|запрети.*голос|блокируй.*голос": "block_last",
     r"добавь.*черный список": "block_last",
     
-    # Разблокировка
+    # Unblocking
     r"разблокируй|убери.*черный список|вычеркни.*списка": "unblock_last",
     r"разблокируй.*голос": "unblock_last",
     
-    # Добавление друга
+    # Adding a friend
     r"запомни.*как|это мой друг|запомни.*голос": "add_friend",
     r"добавь.*друг": "add_friend",
     
-    # Забывание
+    # Forgetting
     r"забудь.*голос|удали.*профиль": "forget_speaker",
     r"удали.*друг": "forget_speaker",
     
-    # Идентификация
+    # Identification
     r"кто.*говорит|кто.*это|who.*is.*speaking": "identify",
     
-    # Справка
+    # Help/info
     r"какие.*голоса|справка.*по.*голосам|list.*voices": "list_voices",
 }
 
 
+def get_owner_control_patterns() -> dict:
+    """Load owner control patterns from i18n locale, falling back to hardcoded defaults."""
+    locale_patterns = t("owner_control_patterns")
+    if isinstance(locale_patterns, dict):
+        return {re.compile(pattern, re.IGNORECASE): action for action, pattern in locale_patterns.items()}
+    return {re.compile(k, re.IGNORECASE): v for k, v in OWNER_CONTROL_PATTERNS.items()}
+
+
 def extract_name_from_command(command: str) -> Optional[str]:
-    """Извлекает имя из команды добавления друга."""
-    # Паттерны: "запомни меня как <имя>", "это мой друг Антон"
-    patterns = [
-        r"как\s+(\w+)",
-        r"друг\s+(\w+)",
-        r"меня\s+зовут\s+(\w+)",
-        r"это\s+(\w+)",
-    ]
-    
+    """Extract a name from a friend-adding command."""
+    # Load patterns from locale, fallback to hardcoded
+    locale_patterns = t("name_patterns.patterns")
+    if isinstance(locale_patterns, list) and locale_patterns:
+        patterns = locale_patterns
+    else:
+        # Fallback to hardcoded patterns
+        patterns = [
+            r"как\s+(\w+)",
+            r"друг\s+(\w+)",
+            r"меня\s+зовут\s+(\w+)",
+            r"это\s+(\w+)",
+        ]
+
+    locale_filter = t("name_patterns.filter_words")
+    if isinstance(locale_filter, list) and locale_filter:
+        filter_words = [w.lower() for w in locale_filter]
+    else:
+        # Fallback to hardcoded filter words
+        filter_words = ["тебя", "меня", "его", "её", "кто", "что"]
+
     for pattern in patterns:
         match = re.search(pattern, command, re.IGNORECASE)
         if match:
             name = match.group(1).capitalize()
-            # Фильтруем общие слова
-            if name.lower() not in ["тебя", "меня", "его", "её", "кто", "что"]:
+            # Filter out common words
+            if name.lower() not in filter_words:
                 return name
-    
+
     return None
 
 
-# Тестирование
+# Testing
 if __name__ == "__main__":
     print("[TEST] Voice Security Test")
-    
+
     security = VoiceSecurity()
-    
-    # Тест детектора
+
+    # Detector test
     test_commands = [
         "удали все файлы",
         "выключи компьютер",

@@ -2,6 +2,13 @@
 # Precedence: config.yaml → .env → hardcoded defaults
 
 # ---------------------------------------------------------------------------
+# Language — controls UI strings, STT, and TTS locale
+# Supported: "ru" (Russian), "en" (English)
+# Override via env: KIWI_LANGUAGE
+# ---------------------------------------------------------------------------
+language: "ru"
+
+# ---------------------------------------------------------------------------
 # WebSocket (OpenClaw Gateway v3)
 # ---------------------------------------------------------------------------
 # Token читается автоматически из ~/.openclaw/openclaw.json

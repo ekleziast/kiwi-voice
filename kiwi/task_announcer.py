@@ -6,20 +6,21 @@ import time
 from typing import Callable, Optional
 
 from kiwi.utils import kiwi_log
+from kiwi.i18n import t
 
 
 class TaskStatusAnnouncer:
-    """Озвучивает статус длительных задач на основе контекста от LLM.
+    """Announces the status of long-running tasks based on LLM context.
 
-    Отслеживает стриминговый текст от LLM и периодически озвучивает
-    краткие статусы, чтобы пользователь понимал что происходит.
+    Monitors streaming text from the LLM and periodically speaks
+    brief status updates so the user knows what is happening.
     """
 
     def __init__(self, speak_func: Callable, intervals: list = None):
         """
         Args:
-            speak_func: Функция для озвучивания (_speak_chunk)
-            intervals: Интервалы оповещений в секундах [10, 30, 60, 120, 180]
+            speak_func: Function for speech output (_speak_chunk)
+            intervals: Notification intervals in seconds [10, 30, 60, 120, 180]
         """
         self.speak_func = speak_func
         self.intervals = intervals or [6, 20, 45, 90, 150]
@@ -27,7 +28,7 @@ class TaskStatusAnnouncer:
         self._start_time = 0.0
         self._last_text = ""
         self._last_announce_time = 0.0
-        self._announced_intervals = set()  # Какие интервалы уже озвучены
+        self._announced_intervals = set()  # Which intervals have already been announced
         self._pending_activity = ""
         self._last_activity_key = ""
         self._last_activity_time = 0.0
@@ -40,12 +41,12 @@ class TaskStatusAnnouncer:
         self._announced_text_len = 0       # track text already consumed by announcer
         self._last_spoken_status = ""      # prevent exact same message twice in a row
 
-        # Минимальный интервал между оповещениями (защита от спама)
+        # Minimum interval between announcements (spam protection)
         self._min_interval = 8.0
         self._activity_min_interval = 4.0
 
     def start(self, command: str):
-        """Запускает мониторинг задачи."""
+        """Start task monitoring."""
         with self._lock:
             self._start_time = time.time()
             self._last_text = ""
@@ -60,18 +61,18 @@ class TaskStatusAnnouncer:
             self._announced_text_len = 0
             self._last_spoken_status = ""
 
-        # Запускаем фоновый поток мониторинга
+        # Start background monitoring thread
         self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._thread.start()
         kiwi_log("STATUS-ANNOUNCER", f"Started monitoring for: {command[:50]}...", level="INFO")
 
     def on_text_update(self, accumulated_text: str):
-        """Вызывается при каждом delta от LLM."""
+        """Called on each delta from the LLM."""
         with self._lock:
             self._last_text = accumulated_text
 
     def on_tts_playing(self, is_playing: bool):
-        """Основной TTS начал/закончил воспроизведение."""
+        """Main TTS started/stopped playback."""
         acquired = self._lock.acquire(timeout=1.0)
         if acquired:
             try:
@@ -83,7 +84,7 @@ class TaskStatusAnnouncer:
             self._tts_is_playing = is_playing
 
     def on_activity(self, message: str):
-        """Получает и по возможности быстро озвучивает шаг выполнения."""
+        """Receive and speak an execution step as soon as possible."""
         cleaned = (message or "").strip()
         if not cleaned:
             return
@@ -98,44 +99,44 @@ class TaskStatusAnnouncer:
         self._announce_pending_activity()
 
     def stop(self):
-        """Останавливает мониторинг (блокирующий — ждёт завершения потока)."""
+        """Stop monitoring (blocking -- waits for the thread to finish)."""
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
         kiwi_log("STATUS-ANNOUNCER", "Stopped", level="INFO")
 
     def stop_nowait(self):
-        """Останавливает мониторинг без ожидания (неблокирующий).
+        """Stop monitoring without waiting (non-blocking).
 
-        Используется из _on_llm_token, где блокировка на 2с недопустима,
-        т.к. задерживает все последующие LLM токены.
+        Used from _on_llm_token, where a 2s block is unacceptable
+        because it delays all subsequent LLM tokens.
         """
         self._stop_event.set()
         kiwi_log("STATUS-ANNOUNCER", "Stop requested (nowait)", level="INFO")
 
     def _monitor_loop(self):
-        """Фоновый поток мониторинга."""
+        """Background monitoring thread."""
         while not self._stop_event.is_set():
             try:
-                time.sleep(1.0)  # Проверяем каждую секунду
+                time.sleep(1.0)  # Check every second
                 self._announce_pending_activity()
 
                 elapsed = time.time() - self._start_time
 
-                # Проверяем, нужно ли озвучить статус
+                # Check if a status announcement is needed
                 for interval in self.intervals:
                     if elapsed >= interval and interval not in self._announced_intervals:
-                        # Проверяем минимальный интервал с последнего оповещения
+                        # Check minimum interval since last announcement
                         time_since_last = time.time() - self._last_announce_time
                         if time_since_last < self._min_interval:
                             continue
 
-                        # Не озвучиваем если основной TTS играет
+                        # Don't announce if main TTS is playing
                         with self._lock:
                             if self._tts_is_playing:
                                 continue
 
-                            # Формируем статусное сообщение
+                            # Generate status message
                             status_msg = self._generate_status_message(elapsed)
 
                         if status_msg:
@@ -146,13 +147,13 @@ class TaskStatusAnnouncer:
                                 self._announced_intervals.add(interval)
                                 self._last_announce_time = time.time()
 
-                        break  # Озвучили один интервал, ждём следующего
+                        break  # Announced one interval, wait for the next
 
             except Exception as e:
                 kiwi_log("STATUS-ANNOUNCER", f"Error in monitor loop: {e}", level="ERROR")
 
     def _announce_pending_activity(self):
-        """Озвучивает отложенную активность, если сейчас это уместно."""
+        """Speak pending activity if conditions are appropriate."""
         msg_to_speak = ""
         now = time.time()
         with self._lock:
@@ -171,7 +172,7 @@ class TaskStatusAnnouncer:
         self.speak_func(msg_to_speak)
 
     def _generate_status_message(self, elapsed: float) -> str:
-        """Генерирует статусное сообщение на основе контекста.
+        """Generate a status message based on context.
 
         IMPORTANT: caller must hold self._lock already.
 
@@ -206,11 +207,11 @@ class TaskStatusAnnouncer:
 
         # Fallback: index-based varied messages — each interval gets a unique one
         fallbacks = [
-            "Думаю над ответом...",
-            "Обрабатываю запрос, подождите...",
-            "Всё ещё работаю, скоро будет результат...",
-            "Продолжаю, это занимает время...",
-            "Почти закончила...",
+            t("status.thinking"),
+            t("status.processing"),
+            t("status.working"),
+            t("status.continuing"),
+            t("status.almost_done"),
         ]
 
         idx = len(self._announced_intervals) % len(fallbacks)

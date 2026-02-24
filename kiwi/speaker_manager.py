@@ -2,11 +2,11 @@
 """
 Speaker Manager - Voice Priority + Access Control
 
-Расширенная система управления голосами:
-- Иерархия приоритетов (OWNER > FRIEND > GUEST > BLOCKED)
-- Hot cache для быстрой идентификации
-- Auto-learning новых голосов
-- Контекст последнего говорящего
+Extended voice management system:
+- Priority hierarchy (OWNER > FRIEND > GUEST > BLOCKED)
+- Hot cache for fast identification
+- Auto-learning of new voices
+- Last speaker context
 """
 
 import os
@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 import numpy as np
 
 from kiwi.utils import kiwi_log
+from kiwi.i18n import t
 
 try:
     from kiwi.speaker_id import SpeakerIdentifier, SpeakerProfile
@@ -32,17 +33,17 @@ except ImportError:
 
 
 class VoicePriority(IntEnum):
-    """Приоритеты голосов (меньше = выше приоритет)."""
-    SELF = -1      # Kiwi TTS (только для фильтрации эха)
-    OWNER = 0      # Владелец - максимальный приоритет
-    FRIEND = 1     # Запомненные друзья/знакомые
-    GUEST = 2      # Неизвестные гости
-    BLOCKED = 99   # Чёрный список (полный игнор)
+    """Voice priorities (lower = higher priority)."""
+    SELF = -1      # Kiwi TTS (echo filtering only)
+    OWNER = 0      # Owner - maximum priority
+    FRIEND = 1     # Remembered friends/acquaintances
+    GUEST = 2      # Unknown guests
+    BLOCKED = 99   # Blacklist (full ignore)
 
 
 @dataclass
 class VoiceContext:
-    """Контекст последнего говорящего."""
+    """Last speaker context."""
     speaker_id: str = ""
     speaker_name: str = ""
     priority: VoicePriority = VoicePriority.GUEST
@@ -52,14 +53,14 @@ class VoiceContext:
     is_processing: bool = False
     
     def is_valid(self) -> bool:
-        """Контекст валиден в течение 30 секунд."""
+        """Context is valid for 30 seconds."""
         return (
             self.speaker_id and 
             time.time() - self.timestamp < 30.0
         )
     
     def update(self, speaker_id: str, speaker_name: str, priority: VoicePriority, confidence: float, command: str = ""):
-        """Обновляет контекст."""
+        """Update the context."""
         self.speaker_id = speaker_id
         self.speaker_name = speaker_name
         self.priority = priority
@@ -68,7 +69,7 @@ class VoiceContext:
         self.timestamp = time.time()
     
     def clear(self):
-        """Очищает контекст."""
+        """Clear the context."""
         self.speaker_id = ""
         self.speaker_name = ""
         self.priority = VoicePriority.GUEST
@@ -79,23 +80,23 @@ class VoiceContext:
 
 @dataclass
 class ExtendedSpeakerProfile:
-    """Расширенный профиль говорящего."""
-    # Из speaker_id
+    """Extended speaker profile."""
+    # From speaker_id
     name: str
     embeddings: List[List[float]]
     priority: str  # "owner", "guest", "self"
     created_at: str = ""
     
-    # Новые поля
-    speaker_id: str = ""  # Уникальный ID (owner, friend_имя, guest_UUID)
-    display_name: str = ""  # Отображаемое имя
+    # New fields
+    speaker_id: str = ""  # Unique ID (owner, friend_name, guest_UUID)
+    display_name: str = ""  # Display name
     is_blocked: bool = False
     auto_learned: bool = False
     last_seen: str = ""
     confidence_threshold: float = 0.70
     
     def get_base_profile(self):
-        """Конвертирует в базовый SpeakerProfile."""
+        """Convert to base SpeakerProfile."""
         if not BASE_AVAILABLE:
             return None
         return SpeakerProfile(
@@ -107,7 +108,7 @@ class ExtendedSpeakerProfile:
     
     @classmethod
     def from_base(cls, base, speaker_id: str = "") -> "ExtendedSpeakerProfile":
-        """Создаёт из базового профиля."""
+        """Create from a base profile."""
         return cls(
             name=base.name,
             embeddings=base.embeddings,
@@ -121,36 +122,36 @@ class ExtendedSpeakerProfile:
 
 class SpeakerManager:
     """
-    Менеджер управления голосами с приоритетами.
-    
-    Особенности:
-    - Hot cache в RAM для <10ms идентификации
-    - Auto-learning при высокой уверенности (>0.85)
-    - Контекст последнего говорящего (30 сек)
-    - OWNER команды прерывают текущие задачи
+    Voice manager with priority support.
+
+    Features:
+    - Hot cache in RAM for <10ms identification
+    - Auto-learning at high confidence (>0.85)
+    - Last speaker context (30 sec)
+    - OWNER commands interrupt current tasks
     """
-    
-    # Настройки
-    AUTO_LEARN_THRESHOLD = 0.85  # Авто-запоминание при такой уверенности
-    IDENTIFY_THRESHOLD = 0.55     # Минимум для распознавания (0.70 was too strict)
-    HOT_CACHE_SIZE = 10           # Размер горячего кэша
-    CONTEXT_TIMEOUT = 30.0        # Таймаут контекста (сек)
-    
-    # OWNER ID (можно настроить)
+
+    # Settings
+    AUTO_LEARN_THRESHOLD = 0.85  # Auto-memorize at this confidence
+    IDENTIFY_THRESHOLD = 0.55     # Minimum for recognition (0.70 was too strict)
+    HOT_CACHE_SIZE = 10           # Hot cache size
+    CONTEXT_TIMEOUT = 30.0        # Context timeout (sec)
+
+    # OWNER ID (configurable)
     OWNER_ID = "owner"
     OWNER_NAME = "Owner"
 
     def __init__(self, profiles_dir: Optional[str] = None, base_identifier: Optional["SpeakerIdentifier"] = None, owner_name: Optional[str] = None):
         """
         Args:
-            profiles_dir: Директория для профилей
+            profiles_dir: Directory for profiles
         """
         if owner_name:
             self.OWNER_NAME = owner_name
         self.profiles_dir = Path(profiles_dir) if profiles_dir else Path("voice_profiles")
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
         
-        # Базовая система идентификации
+        # Base identification system
         # Use shared SpeakerIdentifier if provided, otherwise create new
         self.base_identifier: Optional[SpeakerIdentifier] = base_identifier
         if self.base_identifier is None and BASE_AVAILABLE:
@@ -162,29 +163,29 @@ class SpeakerManager:
         elif self.base_identifier is not None:
             kiwi_log("SPEAKER_MANAGER", "Using shared base identifier")
         
-        # Расширенные профили
+        # Extended profiles
         self.profiles: Dict[str, ExtendedSpeakerProfile] = {}
         self._load_extended_profiles()
         
-        # Hot cache для быстрой идентификации
+        # Hot cache for fast identification
         self._hot_cache: Dict[str, np.ndarray] = {}
         self._hot_cache_lock = threading.Lock()
         
-        # Контекст последнего говорящего
+        # Last speaker context
         self.voice_context = VoiceContext()
         
-        # Временный кэш для обучения
+        # Temporary cache for learning
         self._temp_cache: Dict[str, List[np.ndarray]] = {}  # speaker_id -> embeddings
         self._temp_cache_lock = threading.Lock()
         
         kiwi_log("SPEAKER_MANAGER", f"Initialized with {len(self.profiles)} profiles")
     
     def _get_profiles_path(self) -> Path:
-        """Путь к файлу расширенных профилей."""
+        """Path to the extended profiles file."""
         return self.profiles_dir / "extended_profiles.json"
     
     def _load_extended_profiles(self):
-        """Загружает расширенные профили."""
+        """Load extended profiles."""
         path = self._get_profiles_path()
         if not path.exists():
             return
@@ -201,7 +202,7 @@ class SpeakerManager:
             kiwi_log("SPEAKER_MANAGER", f"Error loading profiles: {e}", level="ERROR")
     
     def _save_extended_profiles(self):
-        """Сохраняет расширенные профили."""
+        """Save extended profiles."""
         try:
             data = {
                 "profiles": {
@@ -214,22 +215,22 @@ class SpeakerManager:
             kiwi_log("SPEAKER_MANAGER", f"Error saving profiles: {e}", level="ERROR")
     
     def _generate_speaker_id(self, name: str) -> str:
-        """Генерирует уникальный speaker_id из имени."""
-        # Очищаем имя
+        """Generate a unique speaker_id from a name."""
+        # Clean the name
         clean = "".join(c for c in name.lower() if c.isalnum() or c == "_")
         return f"friend_{clean}" if clean else f"guest_{int(time.time())}"
     
     def register_owner(self, audio: np.ndarray, sample_rate: int = 16000, name: str = None) -> bool:
         """
-        Регистрирует OWNER.
-        
+        Register OWNER.
+
         Args:
-            audio: Аудио семпл
-            sample_rate: Частота дискретизации
-            name: Имя (по умолчанию OWNER_NAME)
-            
+            audio: Audio sample
+            sample_rate: Sample rate
+            name: Name (default OWNER_NAME)
+
         Returns:
-            True если успешно
+            True if successful
         """
         name = name or self.OWNER_NAME
         speaker_id = self.OWNER_ID
@@ -246,7 +247,7 @@ class SpeakerManager:
             )
             
             if success:
-                # Создаём/обновляем расширенный профиль
+                # Create/update extended profile
                 self.profiles[speaker_id] = ExtendedSpeakerProfile(
                     name=name,
                     embeddings=self.base_identifier.profiles[speaker_id].embeddings if speaker_id in self.base_identifier.profiles else [],
@@ -258,7 +259,7 @@ class SpeakerManager:
                 )
                 self._save_extended_profiles()
                 
-                # Добавляем в hot cache
+                # Add to hot cache
                 embedding = self.base_identifier.extract_embedding(audio, sample_rate)
                 if embedding is not None:
                     with self._hot_cache_lock:
@@ -272,14 +273,14 @@ class SpeakerManager:
     def add_friend(self, audio: np.ndarray, sample_rate: int = 16000, name: str = None, 
                    auto_learn: bool = False) -> Tuple[bool, str]:
         """
-        Добавляет друга/знакомого.
-        
+        Add a friend/acquaintance.
+
         Args:
-            audio: Аудио семпл
-            sample_rate: Частота дискретизации
-            name: Имя человека
-            auto_learn: Авто-запоминание без явного добавления
-            
+            audio: Audio sample
+            sample_rate: Sample rate
+            name: Person's name
+            auto_learn: Auto-memorize without explicit adding
+
         Returns:
             (success, speaker_id)
         """
@@ -325,15 +326,15 @@ class SpeakerManager:
     
     def block_speaker(self, speaker_id: str) -> bool:
         """
-        Блокирует голос (добавляет в чёрный список).
-        
+        Block a voice (add to blacklist).
+
         Args:
-            speaker_id: ID голоса для блокировки
-            
+            speaker_id: Voice ID to block
+
         Returns:
-            True если найден и заблокирован
+            True if found and blocked
         """
-        # OWNER не блокируется
+        # OWNER cannot be blocked
         if speaker_id == self.OWNER_ID:
             kiwi_log("SPEAKER_MANAGER", "Cannot block OWNER", level="WARNING")
             return False
@@ -342,21 +343,21 @@ class SpeakerManager:
             self.profiles[speaker_id].is_blocked = True
             self._save_extended_profiles()
             
-            # Удаляем из hot cache
+            # Remove from hot cache
             with self._hot_cache_lock:
                 self._hot_cache.pop(speaker_id, None)
             
             kiwi_log("SPEAKER_MANAGER", f"BLOCKED: {speaker_id}")
             return True
         
-        # Если не найден в профилях - создаём временную запись
+        # If not found in profiles - create a temporary entry
         if speaker_id:
             self.profiles[speaker_id] = ExtendedSpeakerProfile(
                 name="Blocked",
                 embeddings=[],
                 priority="guest",
                 speaker_id=speaker_id,
-                display_name="Заблокированный",
+                display_name=t("speakers.blocked_display") or "Заблокированный",
                 is_blocked=True,
                 last_seen=datetime.now().isoformat()
             )
@@ -368,13 +369,13 @@ class SpeakerManager:
     
     def unblock_speaker(self, speaker_id: str) -> bool:
         """
-        Разблокирует голос.
-        
+        Unblock a voice.
+
         Args:
-            speaker_id: ID голоса
-            
+            speaker_id: Voice ID
+
         Returns:
-            True если найден и разблокирован
+            True if found and unblocked
         """
         if speaker_id in self.profiles:
             self.profiles[speaker_id].is_blocked = False
@@ -385,23 +386,23 @@ class SpeakerManager:
     
     def identify_speaker_fast(self, audio: np.ndarray, sample_rate: int = 16000) -> Tuple[str, VoicePriority, float, str]:
         """
-        Быстрая идентификация говорящего с приоритетом.
+        Fast speaker identification with priority.
 
-        Использует hot cache для мгновенного ответа.
+        Uses hot cache for instant response.
 
         Returns:
             (speaker_id, priority, confidence, display_name)
         """
         if not self.base_identifier:
-            return "unknown", VoicePriority.GUEST, 0.0, "Незнакомец"
+            return "unknown", VoicePriority.GUEST, 0.0, t("responses.unknown_speaker") or "Незнакомец"
 
         embedding = self.base_identifier.extract_embedding(audio, sample_rate)
 
         if embedding is None:
             kiwi_log("SPEAKER_MANAGER", "Embedding extraction returned None", level="WARNING")
-            return "unknown", VoicePriority.GUEST, 0.0, "Незнакомец"
+            return "unknown", VoicePriority.GUEST, 0.0, t("responses.unknown_speaker") or "Незнакомец"
 
-        # Сначала проверяем hot cache
+        # First check hot cache
         with self._hot_cache_lock:
             cache_items = list(self._hot_cache.items())
 
@@ -416,24 +417,24 @@ class SpeakerManager:
                 best_score = score
                 best_id = sid
 
-        # Проверяем порог для hot cache
+        # Check threshold for hot cache
         if best_id and best_score >= self.IDENTIFY_THRESHOLD:
             priority = self._get_priority(best_id)
             name = self.profiles.get(best_id, ExtendedSpeakerProfile(name=best_id, embeddings=[], priority="guest")).display_name or best_id
             kiwi_log("SPEAKER_MANAGER", f"Hot-cache hit: {best_id} score={best_score:.3f}", level="DEBUG")
             return best_id, priority, best_score, name
 
-        # Если не найден в кэше - полное сканирование
+        # If not found in cache - full scan
         speaker_id, score = self.base_identifier.identify_speaker(audio, sample_rate)
 
         if speaker_id != "unknown" and score >= self.IDENTIFY_THRESHOLD:
             priority = self._get_priority(speaker_id)
 
-            # Проверяем блокировку
+            # Check if blocked
             if speaker_id in self.profiles and self.profiles[speaker_id].is_blocked:
                 return speaker_id, VoicePriority.BLOCKED, score, self.profiles[speaker_id].display_name
 
-            # Добавляем в hot cache
+            # Add to hot cache
             with self._hot_cache_lock:
                 self._hot_cache[speaker_id] = embedding
                 if len(self._hot_cache) > self.HOT_CACHE_SIZE:
@@ -444,12 +445,12 @@ class SpeakerManager:
             kiwi_log("SPEAKER_MANAGER", f"Identified: {speaker_id} score={score:.3f}", level="DEBUG")
             return speaker_id, priority, score, name
 
-        # Неизвестный — возвращаем РЕАЛЬНЫЙ лучший score (не 0.0) для диагностики
+        # Unknown - return the REAL best score (not 0.0) for diagnostics
         kiwi_log("SPEAKER_MANAGER", f"Below threshold: best={speaker_id} score={score:.3f} (thr={self.IDENTIFY_THRESHOLD})", level="DEBUG")
-        return "unknown", VoicePriority.GUEST, score, "Незнакомец"
+        return "unknown", VoicePriority.GUEST, score, t("responses.unknown_speaker") or "Незнакомец"
     
     def _get_priority(self, speaker_id: str) -> VoicePriority:
-        """Определяет приоритет по speaker_id."""
+        """Determine priority by speaker_id."""
         if speaker_id == self.OWNER_ID:
             return VoicePriority.OWNER
         if speaker_id == "self":
@@ -468,17 +469,17 @@ class SpeakerManager:
     
     def auto_learn_voice(self, audio: np.ndarray, speaker_id: str, sample_rate: int = 16000) -> bool:
         """
-        Автоматически обучается на новый голос при высокой уверенности.
-        
+        Automatically learn a new voice at high confidence.
+
         Args:
-            audio: Аудио
-            speaker_id: Текущий ID (может быть "unknown")
-            sample_rate: Частота
-            
+            audio: Audio
+            speaker_id: Current ID (may be "unknown")
+            sample_rate: Sample rate
+
         Returns:
-            True если добавлен новый профиль
+            True if a new profile was added
         """
-        # Проверяем порог
+        # Check threshold
         current_id, confidence = speaker_id, 0.0
         
         if self.base_identifier:
@@ -487,7 +488,7 @@ class SpeakerManager:
         if confidence < self.AUTO_LEARN_THRESHOLD:
             return False
         
-        # Добавляем в временный кэш
+        # Add to temporary cache
         with self._temp_cache_lock:
             if speaker_id not in self._temp_cache:
                 self._temp_cache[speaker_id] = []
@@ -497,12 +498,12 @@ class SpeakerManager:
                 if embedding is not None:
                     self._temp_cache[speaker_id].append(embedding)
             
-            # Если накоплено достаточно семплов (3-5) - сохраняем
+            # If enough samples accumulated (3-5) - save
             if len(self._temp_cache[speaker_id]) >= 3:
-                # Генерируем имя на основе ID
+                # Generate name based on ID
                 name = f"Guest_{speaker_id[-4:]}" if speaker_id.startswith("guest_") else speaker_id
                 
-                # Добавляем как временного друга
+                # Add as a temporary friend
                 if self.base_identifier:
                     self.base_identifier.add_profile_sample(
                         profile_id=speaker_id,
@@ -524,7 +525,7 @@ class SpeakerManager:
                 )
                 self._save_extended_profiles()
                 
-                # Очищаем кэш
+                # Clear cache
                 del self._temp_cache[speaker_id]
                 
                 kiwi_log("SPEAKER_MANAGER", f"AUTO-LEARNED: {name} ({speaker_id})")
@@ -533,22 +534,22 @@ class SpeakerManager:
         return False
     
     def update_context(self, speaker_id: str, speaker_name: str, priority: VoicePriority, confidence: float, command: str = ""):
-        """Обновляет контекст последнего говорящего."""
+        """Update last speaker context."""
         self.voice_context.update(speaker_id, speaker_name, priority, confidence, command)
         kiwi_log("SPEAKER_MANAGER", f"Context updated: {speaker_name} ({priority.name}), confidence={confidence:.2f}")
     
     def get_context_speaker_id(self) -> Optional[str]:
-        """Возвращает ID последнего говорящего (если контекст валиден)."""
+        """Return the last speaker's ID (if context is valid)."""
         if self.voice_context.is_valid():
             return self.voice_context.speaker_id
         return None
     
     def is_owner(self, speaker_id: str) -> bool:
-        """Проверяет, является ли это OWNER."""
+        """Check if this is the OWNER."""
         return speaker_id == self.OWNER_ID
     
     def is_blocked(self, speaker_id: str) -> bool:
-        """Проверяет, заблокирован ли голос."""
+        """Check if a voice is blocked."""
         if speaker_id == self.OWNER_ID:
             return False
         if speaker_id in self.profiles:
@@ -557,29 +558,29 @@ class SpeakerManager:
     
     def can_execute_command(self, speaker_id: str) -> Tuple[bool, str]:
         """
-        Проверяет, может ли голос выполнять команды.
-        
+        Check if a voice can execute commands.
+
         Returns:
             (allowed, reason)
         """
         if speaker_id == "unknown":
-            return False, "Неизвестный голос"
-        
+            return False, t("speaker_access.unknown_voice") or "Неизвестный голос"
+
         if self.is_blocked(speaker_id):
-            return False, "Голос заблокирован"
-        
+            return False, t("speaker_access.voice_blocked") or "Голос заблокирован"
+
         priority = self._get_priority(speaker_id)
-        
+
         if priority == VoicePriority.BLOCKED:
-            return False, "Голос в чёрном списке"
-        
+            return False, t("speaker_access.voice_blacklisted") or "Голос в чёрном списке"
+
         if priority == VoicePriority.SELF:
-            return False, "Это Kiwi (эхо)"
-        
-        return True, "Разрешено"
+            return False, t("speaker_access.self_echo") or "Это Kiwi (эхо)"
+
+        return True, t("speaker_access.allowed") or "Разрешено"
     
     def get_profile_info(self) -> Dict:
-        """Возвращает информацию о профилях."""
+        """Return profile information."""
         return {
             pid: {
                 "name": p.display_name,
@@ -593,32 +594,32 @@ class SpeakerManager:
         }
     
     def who_am_i(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
-        """Отвечает 'Кто это говорит?'."""
+        """Answer 'Who is speaking?'."""
         speaker_id, priority, confidence, name = self.identify_speaker_fast(audio, sample_rate)
-        
+
         if speaker_id == self.OWNER_ID:
-            return f"Это ты, {self.OWNER_NAME}! ({confidence:.0%} уверенность)"
+            return t("speakers.owner_response", name=self.OWNER_NAME, confidence=f"{confidence:.0%}") or f"Это ты, {self.OWNER_NAME}! ({confidence:.0%} уверенность)"
         elif speaker_id == "self":
-            return "Это я, Киви!"
+            return t("speakers.self_response") or "Это я, Киви!"
         elif priority == VoicePriority.BLOCKED:
-            return "Это заблокированный голос"
+            return t("speakers.blocked_response") or "Это заблокированный голос"
         elif speaker_id.startswith("friend_"):
-            return f"Это {name} ({confidence:.0%} уверенность)"
+            return t("speakers.known_response", name=name, confidence=f"{confidence:.0%}") or f"Это {name} ({confidence:.0%} уверенность)"
         elif speaker_id != "unknown":
-            return f"Это {name} ({confidence:.0%} уверенность)"
+            return t("speakers.known_response", name=name, confidence=f"{confidence:.0%}") or f"Это {name} ({confidence:.0%} уверенность)"
         else:
-            return "Я не узнала этот голос"
+            return t("speakers.unknown_response") or "Я не узнала этот голос"
 
 
-# Тестирование
+# Testing
 if __name__ == "__main__":
     print("[TEST] Speaker Manager Test")
-    
+
     manager = SpeakerManager()
-    
+
     print(f"[TEST] Profiles: {len(manager.profiles)}")
     print(f"[TEST] Profile info: {manager.get_profile_info()}")
-    
-    # Проверка OWNER защиты
+
+    # Check OWNER protection
     print(f"[TEST] Owner blocked: {manager.is_blocked('owner')}")
     print(f"[TEST] Can execute (owner): {manager.can_execute_command('owner')}")

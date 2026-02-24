@@ -399,7 +399,7 @@ class ElevenLabsWSStreamManager:
         self._unflushed_chars = getattr(self, '_unflushed_chars', 0) + len(to_send)
 
         # Don't flush short fragments — let ElevenLabs combine them with
-        # the next text for seamless speech.  Short sentences like "Работаю!"
+        # the next text for seamless speech.  Short sentences like "Working!"
         # flushed alone cause audible gaps before the next sentence.
         _MIN_FLUSH_CHARS = 40
         flush = is_sentence_end and self._unflushed_chars >= _MIN_FLUSH_CHARS

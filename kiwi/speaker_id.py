@@ -18,8 +18,9 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 
 from kiwi.utils import kiwi_log
+from kiwi.i18n import t
 
-# pyannote.audio для speaker embedding (опционально, fallback есть)
+# pyannote.audio for speaker embedding (optional, fallback available)
 try:
     from pyannote.audio.pipelines.speaker_verification import PretrainedSpeakerEmbedding
     PYANNOTE_AVAILABLE = True
@@ -30,14 +31,14 @@ except ImportError:
 
 @dataclass
 class SpeakerProfile:
-    """Профиль говорящего."""
+    """Speaker profile."""
     name: str
-    embeddings: List[List[float]]  # Список векторов (для усреднения)
+    embeddings: List[List[float]]  # List of vectors (for averaging)
     priority: str  # "owner", "guest", "self" (Kiwi TTS), "unknown"
     created_at: str = ""
     
     def get_average_embedding(self) -> Optional[np.ndarray]:
-        """Возвращает усреднённый embedding."""
+        """Return the averaged embedding."""
         if not self.embeddings:
             return None
         return np.mean(np.array(self.embeddings), axis=0)
@@ -45,20 +46,20 @@ class SpeakerProfile:
 
 class SpeakerIdentifier:
     """
-    Идентификатор говорящих на основе voice embeddings.
-    
-    Использует pyannote/embedding для извлечения признаков голоса.
-    Fallback: простое сравнение спектральных характеристик если pyannote недоступен.
+    Speaker identifier based on voice embeddings.
+
+    Uses pyannote/embedding for voice feature extraction.
+    Fallback: simple spectral feature comparison if pyannote is unavailable.
     """
-    
-    # Пороги сходства (косинусное расстояние)
-    SIMILARITY_THRESHOLD = 0.55  # Выше = тот же говорящий (0.70 was too strict for noisy home environments)
-    SELF_SIMILARITY_THRESHOLD = 0.65  # Строже для собственного голоса
+
+    # Similarity thresholds (cosine distance)
+    SIMILARITY_THRESHOLD = 0.55  # Higher = same speaker (0.70 was too strict for noisy home environments)
+    SELF_SIMILARITY_THRESHOLD = 0.65  # Stricter for own voice
     
     def __init__(self, profiles_dir: Optional[str] = None):
         """
         Args:
-            profiles_dir: Директория для хранения профилей (по умолчанию: папка модуля)
+            profiles_dir: Directory for storing profiles (default: module directory)
         """
         if profiles_dir is None:
             from kiwi import PROJECT_ROOT
@@ -72,22 +73,22 @@ class SpeakerIdentifier:
         self._model_loaded = False
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Ленивая загрузка: модель загрузится при первом вызове extract_embedding()
+        # Lazy loading: model loads on first call to extract_embedding()
         kiwi_log("SPEAKER-ID", f"Initialized (lazy loading enabled, device={self.device})")
-        
-        # Загружаем существующие профили
+
+        # Load existing profiles
         self._load_profiles()
-        
-        # Если нет профиля self (Kiwi TTS) - создадим при первой генерации
+
+        # If no self profile (Kiwi TTS) exists - will create on first generation
         if "self" not in self.profiles:
             kiwi_log("SPEAKER-ID", "No self-profile found. Will create on first TTS.")
     
     def _get_profile_path(self) -> Path:
-        """Путь к файлу профилей."""
+        """Path to the profiles file."""
         return self.profiles_dir / "profiles.json"
     
     def _load_profiles(self):
-        """Загружает профили из JSON."""
+        """Load profiles from JSON."""
         profile_path = self._get_profile_path()
         if not profile_path.exists():
             return
@@ -104,7 +105,7 @@ class SpeakerIdentifier:
             kiwi_log("SPEAKER-ID", f"Error loading profiles: {e}", level="ERROR")
     
     def _save_profiles(self):
-        """Сохраняет профили в JSON."""
+        """Save profiles to JSON."""
         try:
             data = {
                 "profiles": {
@@ -117,7 +118,7 @@ class SpeakerIdentifier:
             kiwi_log("SPEAKER-ID", f"Error saving profiles: {e}", level="ERROR")
     
     def _ensure_model_loaded(self):
-        """Загружает модель при первом вызове (ленивая загрузка)."""
+        """Load model on first call (lazy loading)."""
         if self._model_loaded:
             return
         
@@ -151,37 +152,37 @@ class SpeakerIdentifier:
     
     def extract_embedding(self, audio: np.ndarray, sample_rate: int = 16000) -> Optional[np.ndarray]:
         """
-        Извлекает embedding из аудио.
-        
+        Extract embedding from audio.
+
         Args:
-            audio: numpy array с аудио (float32, [-1, 1])
-            sample_rate: частота дискретизации
-            
+            audio: numpy array with audio (float32, [-1, 1])
+            sample_rate: sample rate
+
         Returns:
-            embedding вектор или None если не удалось
+            embedding vector or None if extraction failed
         """
-        # Ленивая загрузка модели при первом вызове
+        # Lazy load model on first call
         self._ensure_model_loaded()
         
         if self.embedding_model is None:
             return self._extract_fallback_embedding(audio, sample_rate)
         
         try:
-            # pyannote ожидает torch tensor shape: (channels, samples)
+            # pyannote expects torch tensor shape: (channels, samples)
             if len(audio.shape) == 1:
                 waveform = torch.tensor(audio, dtype=torch.float32).unsqueeze(0)
             else:
                 waveform = torch.tensor(audio, dtype=torch.float32)
             
-            # Проверяем длину (нужно минимум ~1 секунды)
+            # Check length (need at least ~1 second)
             if waveform.shape[1] < sample_rate * 0.5:
-                # Слишком короткое аудио
+                # Audio too short
                 return None
             
             with torch.no_grad():
                 embedding = self.embedding_model(waveform)
             
-            # Проверяем тип результата (torch tensor или numpy array)
+            # Check result type (torch tensor or numpy array)
             if hasattr(embedding, 'cpu'):
                 return embedding.cpu().numpy().flatten()
             else:
@@ -193,35 +194,35 @@ class SpeakerIdentifier:
     
     def _extract_fallback_embedding(self, audio: np.ndarray, sample_rate: int) -> Optional[np.ndarray]:
         """
-        Fallback метод если pyannote недоступен.
-        Использует простые спектральные признаки.
+        Fallback method when pyannote is unavailable.
+        Uses simple spectral features.
         """
         try:
-            # Простая спектральная характеристика
+            # Simple spectral characterization
             from numpy.fft import rfft
             
-            # Разбиваем на окна
+            # Split into windows
             window_size = int(sample_rate * 0.025)  # 25ms
             hop_size = int(sample_rate * 0.010)     # 10ms
             
-            # Извлекаем MFCC-подобные признаки (упрощённые)
+            # Extract simplified MFCC-like features
             frames = []
             for i in range(0, len(audio) - window_size, hop_size):
                 frame = audio[i:i + window_size]
-                # Оконная функция
+                # Window function
                 frame = frame * np.hanning(len(frame))
                 # FFT
                 spectrum = np.abs(rfft(frame))
-                # Логарифмическая шкала
+                # Logarithmic scale
                 log_spectrum = np.log(spectrum + 1e-10)
-                frames.append(log_spectrum[:40])  # Берём первые 40 бинов
+                frames.append(log_spectrum[:40])  # Take the first 40 bins
             
             if not frames:
                 return None
             
-            # Усредняем по времени
+            # Average over time
             mean_spectrum = np.mean(frames, axis=0)
-            # Нормализуем
+            # Normalize
             mean_spectrum = (mean_spectrum - np.mean(mean_spectrum)) / (np.std(mean_spectrum) + 1e-10)
             
             return mean_spectrum
@@ -231,7 +232,7 @@ class SpeakerIdentifier:
             return None
     
     def cosine_similarity(self, emb1: np.ndarray, emb2: np.ndarray) -> float:
-        """Вычисляет косинусное сходство между двумя векторами."""
+        """Compute cosine similarity between two vectors."""
         norm1 = np.linalg.norm(emb1)
         norm2 = np.linalg.norm(emb2)
         
@@ -247,13 +248,13 @@ class SpeakerIdentifier:
         exclude_self: bool = False
     ) -> Tuple[str, float]:
         """
-        Определяет говорящего по аудио.
-        
+        Identify speaker from audio.
+
         Args:
-            audio: numpy array с аудио
-            sample_rate: частота дискретизации
-            exclude_self: если True, не возвращает "self" (для проверки эха)
-            
+            audio: numpy array with audio
+            sample_rate: sample rate
+            exclude_self: if True, never returns "self" (for echo checking)
+
         Returns:
             (speaker_id, confidence)
             speaker_id: "self", "owner", "guest", "unknown"
@@ -263,7 +264,7 @@ class SpeakerIdentifier:
         if embedding is None:
             return "unknown", 0.0
         
-        # Если нет профилей - возвращаем unknown
+        # If no profiles exist - return unknown
         if not self.profiles:
             return "unknown", 0.0
         
@@ -290,7 +291,7 @@ class SpeakerIdentifier:
         scores_str = ", ".join(f"{k}={v:.3f}" for k, v in sorted(all_scores.items(), key=lambda x: -x[1]))
         kiwi_log("SPEAKER-ID", f"Scores: [{scores_str}] best={best_match}({best_score:.3f})", level="DEBUG")
 
-        # Определяем порог в зависимости от типа
+        # Determine threshold based on type
         if best_match == "self":
             threshold = self.SELF_SIMILARITY_THRESHOLD
         else:
@@ -303,13 +304,13 @@ class SpeakerIdentifier:
     
     def is_self_speaking(self, audio: np.ndarray, sample_rate: int = 16000) -> Tuple[bool, float]:
         """
-        Проверяет, говорит ли сама Киви (эхо от TTS).
-        
+        Check if Kiwi herself is speaking (TTS echo).
+
         Returns:
             (is_self, confidence)
         """
         if "self" not in self.profiles:
-            # Нет профиля - считаем что не эхо
+            # No profile - assume not echo
             return False, 0.0
         
         speaker_id, confidence = self.identify_speaker(audio, sample_rate)
@@ -328,17 +329,17 @@ class SpeakerIdentifier:
         priority: str = "guest"
     ) -> bool:
         """
-        Добавляет образец голоса к профилю.
-        
+        Add a voice sample to a profile.
+
         Args:
-            profile_id: ID профиля ("self", "owner", "guest_1", etc.)
-            audio: аудио семпл
-            sample_rate: частота дискретизации
-            name: Человекочитаемое имя
+            profile_id: Profile ID ("self", "owner", "guest_1", etc.)
+            audio: audio sample
+            sample_rate: sample rate
+            name: Human-readable name
             priority: "owner", "guest", "self"
-            
+
         Returns:
-            True если успешно
+            True if successful
         """
         embedding = self.extract_embedding(audio, sample_rate)
         
@@ -357,7 +358,7 @@ class SpeakerIdentifier:
         
         self.profiles[profile_id].embeddings.append(embedding.tolist())
         
-        # Ограничиваем количество семплов (берём последние 5)
+        # Limit the number of samples (keep the last 5)
         if len(self.profiles[profile_id].embeddings) > 5:
             self.profiles[profile_id].embeddings = self.profiles[profile_id].embeddings[-5:]
         
@@ -368,16 +369,16 @@ class SpeakerIdentifier:
     
     def create_self_profile(self, tts_audio: np.ndarray, sample_rate: int = 24000) -> bool:
         """
-        Создаёт профиль собственного голоса (TTS) для фильтрации эха.
-        
+        Create own voice profile (TTS) for echo filtering.
+
         Args:
-            tts_audio: аудио сгенерированное TTS
-            sample_rate: частота дискретизации
-            
+            tts_audio: audio generated by TTS
+            sample_rate: sample rate
+
         Returns:
-            True если успешно
+            True if successful
         """
-        # Конвертируем sample_rate если нужно
+        # Convert sample_rate if needed
         if sample_rate != 16000:
             import librosa
             tts_audio = librosa.resample(
@@ -399,18 +400,20 @@ class SpeakerIdentifier:
         
         return success
     
-    def calibrate_self_from_tts(self, tts_text: str = "Привет, я Киви. Это тестовая фраза для калибровки."):
+    def calibrate_self_from_tts(self, tts_text: str = None):
         """
-        Генерирует тестовую фразу через TTS и создаёт профиль.
-        Используется для начальной калибровки.
-        
+        Generate a test phrase via TTS and create a profile.
+        Used for initial calibration.
+
         Returns:
-            True если успешно
+            True if successful
         """
+        if tts_text is None:
+            tts_text = t("speakers.calibration_phrase") or "Привет, я Киви. Это тестовая фраза для калибровки."
         try:
-            # Импортируем здесь чтобы избежать циклических зависимостей
+            # Import here to avoid circular dependencies
             from kiwi.tts.piper import PiperTTS
-            
+
             tts = PiperTTS()
             audio, sr = tts.synthesize(tts_text)
             
@@ -423,7 +426,7 @@ class SpeakerIdentifier:
         return False
     
     def get_profile_info(self) -> Dict:
-        """Возвращает информацию о загруженных профилях."""
+        """Return information about loaded profiles."""
         return {
             pid: {
                 "name": p.name,
@@ -434,13 +437,13 @@ class SpeakerIdentifier:
         }
 
 
-# Тестирование модуля
+# Module testing
 if __name__ == "__main__":
     print("[TEST] Speaker Identifier Test")
-    
+
     sid = SpeakerIdentifier()
-    
-    # Если нет self-профиля - создаём
+
+    # If no self-profile exists - create one
     if "self" not in sid.profiles:
         print("[TEST] Creating self profile...")
         sid.calibrate_self_from_tts()

@@ -23,7 +23,7 @@ from kiwi.utils import kiwi_log
 
 @dataclass
 class TTSConfig:
-    """Конфигурация TTS клиента."""
+    """TTS client configuration."""
     endpoint_id: str = ""
     api_key: str = ""
     default_voice: str = "Ono_Anna"

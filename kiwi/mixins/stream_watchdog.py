@@ -6,6 +6,7 @@ from typing import Optional
 
 from kiwi.state_machine import DialogueState
 from kiwi.utils import kiwi_log
+from kiwi.i18n import t
 
 
 class StreamWatchdogMixin:
@@ -237,7 +238,7 @@ class StreamWatchdogMixin:
                 self._task_status_announcer = None
 
             self._set_state(DialogueState.IDLE)
-            self.speak("Ответ завис. Повтори, пожалуйста.", style="calm")
+            self.speak(t("responses.error_stream_stalled"), style="calm")
             return
 
         kiwi_log(
@@ -289,7 +290,7 @@ class StreamWatchdogMixin:
             if not resend_ok:
                 kiwi_log("STREAM-WATCHDOG", "Retry send failed", level="ERROR")
                 self._set_state(DialogueState.IDLE)
-                self.speak("Не получилось получить ответ. Попробуй ещё раз.", style="calm")
+                self.speak(t("responses.error_retry_failed"), style="calm")
                 self._stop_stream_watchdog()
                 return
 

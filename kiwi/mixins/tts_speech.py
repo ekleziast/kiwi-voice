@@ -12,6 +12,27 @@ from kiwi.state_machine import DialogueState
 from kiwi.text_processing import clean_chunk_for_tts, normalize_tts_text, split_text_into_chunks
 from kiwi.utils import kiwi_log
 
+# Language code → TTS language name mapping
+_LANG_TO_TTS_NAME = {
+    "ru": "Russian",
+    "en": "English",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "zh": "Chinese",
+    "ja": "Japanese",
+}
+
+
+def _resolve_tts_language(language, config=None):
+    """Resolve TTS language from explicit value, config, or default."""
+    if language is not None:
+        return language
+    if config is not None:
+        lang_code = getattr(config, "language", "ru")
+        return _LANG_TO_TTS_NAME.get(lang_code, "Russian")
+    return "Russian"
+
 
 class TTSSpeechMixin:
     """TTS audio generation, speak() entry point, and streaming playback."""
@@ -25,10 +46,11 @@ class TTSSpeechMixin:
         text: str,
         style: str = "neutral",
         voice: Optional[str] = None,
-        language: str = "Russian",
+        language: str = None,
         use_cache: bool = True,
     ):
         """Unified TTS generation — delegates to self.tts.synthesize()."""
+        language = _resolve_tts_language(language, getattr(self, "config", None))
         resolved_style = style or self.config.tts_default_style
         kwargs = {}
         if self.tts_provider == "elevenlabs":
@@ -71,13 +93,14 @@ class TTSSpeechMixin:
 
             kiwi_log("TTS-CHUNK", f"Synthesizing ({self.tts_provider}): {clean_chunk[:60]}...", level="INFO")
             started = time.time()
+            resolved_language = _resolve_tts_language(None, getattr(self, "config", None))
 
             if self.tts_provider == "elevenlabs":
                 audio, sample_rate = self.tts.synthesize(
                     text=clean_chunk,
                     voice=self.config.tts_elevenlabs_voice_id,
                     style=self._streaming_style,
-                    language="Russian",
+                    language=resolved_language,
                     use_cache=True,
                     model_id=self.config.tts_elevenlabs_model_id,
                     output_format=self.config.tts_elevenlabs_output_format,
@@ -97,7 +120,7 @@ class TTSSpeechMixin:
                         text=clean_chunk,
                         voice=self.config.tts_elevenlabs_voice_id,
                         style=self._streaming_style,
-                        language="Russian",
+                        language=resolved_language,
                         use_cache=True,
                         model_id=self.config.tts_elevenlabs_model_id,
                         output_format=self.config.tts_elevenlabs_output_format,
@@ -114,7 +137,7 @@ class TTSSpeechMixin:
                     text=clean_chunk,
                     style=self._streaming_style,
                     voice=None,
-                    language="Russian",
+                    language=resolved_language,
                     use_cache=True,
                 )
 
@@ -418,10 +441,11 @@ class TTSSpeechMixin:
         text: str,
         style: str = "neutral",
         voice: Optional[str] = None,
-        language: str = "Russian",
+        language: str = None,
         allow_barge_in: bool = True,
     ):
         """Generate speech and play through speakers (streaming for long texts)."""
+        language = _resolve_tts_language(language, getattr(self, "config", None))
         if not text or not text.strip():
             return
 
@@ -509,8 +533,9 @@ class TTSSpeechMixin:
     # Legacy streaming speak
     # ------------------------------------------------------------------
 
-    def _speak_streaming(self, text: str, style: str = "neutral", voice: Optional[str] = None, language: str = "Russian"):
+    def _speak_streaming(self, text: str, style: str = "neutral", voice: Optional[str] = None, language: str = None):
         """Streaming playback: generate and play chunks in parallel."""
+        language = _resolve_tts_language(language, getattr(self, "config", None))
         chunks = split_text_into_chunks(text, max_chunk_size=150)
         kiwi_log("TTS-STREAM", f"Text split into {len(chunks)} chunks", level="INFO")
 

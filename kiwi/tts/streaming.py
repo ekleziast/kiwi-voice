@@ -14,10 +14,10 @@ from kiwi.utils import kiwi_log
 
 
 class StreamingTTSManager:
-    """Менеджер для потокового TTS во время генерации LLM.
+    """Manager for streaming TTS during LLM generation.
 
-    Накапливает токены от LLM и отправляет готовые предложения в TTS
-    параллельно с генерацией следующих предложений.
+    Accumulates tokens from the LLM and sends complete sentences to TTS
+    in parallel with the generation of subsequent sentences.
     """
 
     def __init__(
@@ -52,7 +52,7 @@ class StreamingTTSManager:
         self._stop_event = threading.Event()
 
     def start(self):
-        """Запускает менеджер стриминга."""
+        """Start the streaming manager."""
         with self._lock:
             self._buffer = ""
             self._sent_text = ""
@@ -68,22 +68,22 @@ class StreamingTTSManager:
                 thread_name_prefix="kiwi-tts-synth",
             )
 
-        # Отдельный поток воспроизводит чанки строго по порядку.
+        # Separate thread plays chunks strictly in order.
         self._playback_thread = threading.Thread(target=self._playback_worker, daemon=True)
         self._playback_thread.start()
         kiwi_log("STREAM-TTS", "Manager started", level="INFO")
 
     def stop(self, graceful: bool = True):
-        """Останавливает менеджер стриминга.
+        """Stop the streaming manager.
 
-        graceful=True: договаривает всё, что уже в очереди/буфере.
-        graceful=False: немедленно прерывает текущую озвучку и очищает очередь.
+        graceful=True: finishes everything already in the queue/buffer.
+        graceful=False: immediately interrupts current playback and clears the queue.
         """
         with self._lock:
             self._is_active = False
             self._graceful_shutdown = graceful
             if graceful:
-                # Отправляем остаток буфера если есть
+                # Send remaining buffer if any
                 final_chunk = self._buffer[len(self._sent_text):].strip()
                 if final_chunk:
                     kiwi_log(
@@ -95,7 +95,7 @@ class StreamingTTSManager:
             self._finalized = True
             self._playback_cond.notify_all()
 
-        # Немедленная остановка (barge-in / перезапуск запроса)
+        # Immediate stop (barge-in / request restart)
         if not graceful:
             self._stop_event.set()
             with self._lock:
@@ -139,13 +139,13 @@ class StreamingTTSManager:
             kiwi_log("STREAM-TTS", "Manager stopped (immediate)", level="INFO")
 
     def _clean_token(self, token: str) -> str:
-        """Очищает токен от JSON-паттернов delta content.
+        """Clean JSON delta content patterns from token.
 
-        ЧИСТЫЙ REGEX — без ast.literal_eval для избежания проблем с форматированием.
+        Pure regex — no ast.literal_eval to avoid formatting issues.
 
-        Обрабатывает случаи:
-        - {'type': 'text', 'text': '...'} (одиночный dict)
-        - Конкатенацию нескольких dict'ов
+        Handles cases:
+        - {'type': 'text', 'text': '...'} (single dict)
+        - Concatenation of multiple dicts
         """
         if not isinstance(token, str):
             return str(token) if token else ""
@@ -154,19 +154,19 @@ class StreamingTTSManager:
         if not stripped:
             return ""
 
-        # Если это обычный текст без паттернов dict — возвращаем как есть
+        # If this is plain text without dict patterns — return as-is
         if not (("'text'" in stripped or '"text"' in stripped) and
                 (stripped.startswith('{') or stripped.startswith('['))):
             return token
 
-        # Случай 1: Список с dict'ами [{'type': 'text', 'text': '...'}]
+        # Case 1: List of dicts [{'type': 'text', 'text': '...'}]
         if stripped.startswith('[') and stripped.endswith(']'):
-            # Ищем все dict'ы внутри списка: {...}
+            # Find all dicts inside the list: {...}
             dict_matches = re.findall(r'\{[^{}]*\}', stripped)
             if dict_matches:
                 texts = []
                 for dict_str in dict_matches:
-                    # Ищем 'text': '...' или "text": "..."
+                    # Look for 'text': '...' or "text": "..."
                     text_match = re.search(r"'text':\s*'([^']*?)'", dict_str)
                     if text_match:
                         texts.append(text_match.group(1))
@@ -177,7 +177,7 @@ class StreamingTTSManager:
                 if texts:
                     return "".join(texts)
 
-        # Случай 2: Одиночный dict — ищем 'text': '...' или "text": "..."
+        # Case 2: Single dict — look for 'text': '...' or "text": "..."
         if stripped.startswith('{') and stripped.endswith('}'):
             text_match = re.search(r"'text':\s*'([^']*?)'", stripped)
             if text_match:
@@ -186,7 +186,7 @@ class StreamingTTSManager:
             if text_match:
                 return text_match.group(1)
 
-        # Случай 3: Конкатенация dict'ов — ищем все вхождения
+        # Case 3: Concatenated dicts — find all occurrences
         matches = re.findall(r"'text':\s*'([^']*?)'", token)
         if matches:
             result = "".join(matches)
@@ -199,12 +199,12 @@ class StreamingTTSManager:
             if result:
                 return result
 
-        # Случай 4: Разбиваем по }{ и ищем text в каждой части
+        # Case 4: Split by }{ and look for text in each part
         if '}{' in token:
             parts = token.split('}{')
             texts = []
             for i, part in enumerate(parts):
-                # Добавляем скобки обратно
+                # Add braces back
                 if i == 0:
                     part = part + '}'
                 elif i == len(parts) - 1:
@@ -212,7 +212,7 @@ class StreamingTTSManager:
                 else:
                     part = '{' + part + '}'
 
-                # Ищем text с помощью regex
+                # Search for text using regex
                 text_match = re.search(r"'text':\s*'([^']*?)'", part)
                 if text_match:
                     texts.append(text_match.group(1))
@@ -227,11 +227,11 @@ class StreamingTTSManager:
         return token
 
     def on_token(self, token: str):
-        """Принимает токен от LLM и накапливает."""
+        """Accept a token from the LLM and accumulate it."""
         if not self._is_active:
             return
 
-        # Очищаем токен от JSON-мусора перед добавлением в буфер
+        # Clean JSON artifacts from token before adding to buffer
         cleaned_token = self._clean_token(token)
         if not cleaned_token:
             return
@@ -241,23 +241,23 @@ class StreamingTTSManager:
             self._try_send_chunk()
 
     def _try_send_chunk(self):
-        """Пытается отправить накопленный чанк в TTS."""
+        """Try to send the accumulated chunk to TTS."""
         available = self._buffer[len(self._sent_text):]
 
-        # Ищем конец предложения
+        # Look for sentence end
         sentence_end = -1
         for i, char in enumerate(available):
             if char in '.!?' and i > self.min_chunk_chars:
                 sentence_end = i + 1
                 break
-            # Или запятую после достаточного количества символов
+            # Or a comma after enough characters
             if char == ',' and i > self.max_chunk_chars:
                 sentence_end = i + 1
                 break
 
-        # Если накопилось много текста без знаков препинания — разбиваем по пробелу
+        # If too much text accumulated without punctuation — split by space
         if sentence_end == -1 and len(available) > self.max_chunk_chars:
-            # Ищем последний пробел перед max_chunk_chars
+            # Find last space before max_chunk_chars
             last_space = available.rfind(' ', self.min_chunk_chars, self.max_chunk_chars)
             if last_space > 0:
                 sentence_end = last_space
@@ -270,7 +270,7 @@ class StreamingTTSManager:
                 kiwi_log("STREAM-TTS", f"Queued chunk ({len(chunk)} chars): {chunk[:50]}...", level="INFO")
 
     def _enqueue_chunk_locked(self, chunk: str):
-        """Ставит чанк в параллельную генерацию (вызывать только под self._lock)."""
+        """Submit chunk for parallel synthesis (must be called under self._lock)."""
         if not self._executor:
             return
         chunk_id = self._next_chunk_id
@@ -279,15 +279,15 @@ class StreamingTTSManager:
         self._playback_cond.notify_all()
 
     def _synthesize_job(self, chunk_id: int, chunk: str):
-        """Генерирует аудио для чанка (в пуле потоков)."""
+        """Generate audio for a chunk (in thread pool)."""
         kiwi_log("STREAM-TTS", f"Processing chunk #{chunk_id}: {chunk[:60]}...", level="INFO")
         if self.tts_synthesize_callback:
             return self.tts_synthesize_callback(chunk)
-        # Fallback: старый путь, когда один callback делает и синтез, и проигрывание.
+        # Fallback: legacy path where a single callback does both synthesis and playback.
         return chunk
 
     def _playback_worker(self):
-        """Воспроизводит результаты строго в порядке исходных чанков."""
+        """Play results strictly in the order of original chunks."""
         while True:
             try:
                 with self._playback_cond:

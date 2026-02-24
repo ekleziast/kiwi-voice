@@ -9,10 +9,11 @@ import time
 from typing import Optional
 
 from kiwi.utils import kiwi_log
+from kiwi.i18n import t
 
 
 class OpenClawCLI:
-    """Клиент для общения с OpenClaw через CLI."""
+    """Client for communicating with OpenClaw via CLI."""
 
     def __init__(
         self,
@@ -43,13 +44,13 @@ class OpenClawCLI:
         return openclaw_bin
 
     def _get_command(self, args: list) -> list:
-        """Формирует команду с учётом платформы."""
+        """Build a command taking platform into account."""
         if self.openclaw_bin.endswith('.mjs'):
             return ["node", self.openclaw_bin] + args
         return [self.openclaw_bin] + args
 
     def _check_cli(self):
-        """Проверяет доступность openclaw CLI."""
+        """Check openclaw CLI availability."""
         try:
             cmd = self._get_command(["--version"])
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -68,11 +69,11 @@ class OpenClawCLI:
             kiwi_log("OPENCLAW", f"CLI check error: {e}", level="ERROR")
 
     def is_processing(self) -> bool:
-        """Проверяет, выполняется ли сейчас обработка."""
+        """Check if processing is currently in progress."""
         return self._is_processing
 
     def cancel(self) -> bool:
-        """Прерывает текущую обработку."""
+        """Cancel the current processing."""
         if self._current_process and self._is_processing:
             kiwi_log("OPENCLAW", "Cancelling current operation...", level="INFO")
             try:
@@ -93,7 +94,7 @@ class OpenClawCLI:
         return False
 
     def _is_rate_limit_error(self, stderr: str) -> bool:
-        """Проверяет, является ли ошибка rate_limit."""
+        """Check if the error is a rate_limit error."""
         if not stderr:
             return False
         rate_limit_indicators = [
@@ -107,9 +108,9 @@ class OpenClawCLI:
         return any(indicator in stderr_lower for indicator in rate_limit_indicators)
 
     def chat(self, message: str) -> str:
-        """Отправляет сообщение в существующую сессию через agent CLI с retry при rate_limit.
+        """Send a message to an existing session via agent CLI with retry on rate_limit.
 
-        ИСПРАВЛЕНО: Использует subprocess.run() вместо ненадёжного стримингового чтения.
+        FIX: Uses subprocess.run() instead of unreliable streaming reads.
         """
         args = [
             "agent",
@@ -123,7 +124,7 @@ class OpenClawCLI:
 
         cmd = self._get_command(args)
 
-        # Retry loop с нарастающими задержками
+        # Retry loop with increasing delays
         for attempt in range(self.retry_max + 1):
             if attempt > 0:
                 delay = self.retry_delays[min(attempt - 1, len(self.retry_delays) - 1)]
@@ -134,8 +135,8 @@ class OpenClawCLI:
             self._is_processing = True
 
             try:
-                # ИСПРАВЛЕНИЕ: Используем subprocess.run() вместо Popen + стриминг
-                # Это надёжнее и гарантирует чтение всего stdout
+                # FIX: Use subprocess.run() instead of Popen + streaming
+                # This is more reliable and guarantees reading all stdout
                 start_time = time.time()
                 result = subprocess.run(
                     cmd,
@@ -159,56 +160,56 @@ class OpenClawCLI:
                         return response
                     else:
                         kiwi_log("OPENCLAW", "Empty response after cleaning", level="WARNING")
-                        return "Извини, я не получила ответ."
+                        return t("cli_errors.empty_response")
                 else:
-                    # Проверяем, является ли ошибка rate_limit
+                    # Check if the error is a rate_limit
                     if self._is_rate_limit_error(stderr) and attempt < self.retry_max:
                         kiwi_log("OPENCLAW", "Rate limit detected, will retry...", level="WARNING")
                         continue
 
                     kiwi_log("OPENCLAW", f"CLI error (code {returncode})", level="ERROR")
                     kiwi_log("OPENCLAW", f"stderr: {stderr[:200]}", level="ERROR")
-                    return "Извини, произошла ошибка при обработке запроса."
+                    return t("cli_errors.processing_error")
 
             except subprocess.TimeoutExpired:
                 self._is_processing = False
                 kiwi_log("OPENCLAW", "Timeout expired", level="WARNING")
-                return "Извини, ответ занял слишком много времени."
+                return t("cli_errors.timeout")
             except Exception as e:
                 self._is_processing = False
                 kiwi_log("OPENCLAW", f"Error: {e}", level="ERROR")
-                return f"Ошибка: {str(e)}"
+                return t("cli_errors.generic_error", error=str(e))
 
-        # Все попытки исчерпаны
-        return "Извини, сервис временно недоступен (rate limit). Попробуй позже."
+        # All attempts exhausted
+        return t("cli_errors.rate_limit")
 
     def _clean_response(self, text: str) -> str:
-        """Очищает ответ от баннера OpenClaw и лишнего форматирования."""
+        """Clean the response by removing the OpenClaw banner and extra formatting."""
         if not text:
             return ""
 
         lines = text.split('\n')
         cleaned_lines = []
 
-        # Паттерны для фильтрации баннера OpenClaw
+        # Patterns for filtering the OpenClaw banner
         banner_patterns = [
             r'^🦞\s*OpenClaw',           # 🦞 OpenClaw ...
             r'^OpenClaw\s+\d',           # OpenClaw 2026.2.3...
-            r'^\s*\|+\s*$',              # Спиннеры: |, ||, |||
-            r'^\s*[o\-/\⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]+\s*$',  # Спиннеры анимации
-            r'^\s*Your inbox.*',          # Баннер текст
-            r'^\s*WhatsApp automation.*', # Баннер текст
-            r'^\s*EXFOLIATE.*',           # Баннер текст
+            r'^\s*\|+\s*$',              # Spinners: |, ||, |||
+            r'^\s*[o\-/\⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]+\s*$',  # Animation spinners
+            r'^\s*Your inbox.*',          # Banner text
+            r'^\s*WhatsApp automation.*', # Banner text
+            r'^\s*EXFOLIATE.*',           # Banner text
         ]
 
         for line in lines:
             line_stripped = line.strip()
 
-            # Пропускаем пустые строки
+            # Skip empty lines
             if not line_stripped:
                 continue
 
-            # Проверяем паттерны баннера
+            # Check banner patterns
             is_banner = False
             for pattern in banner_patterns:
                 if re.match(pattern, line_stripped, re.IGNORECASE):
@@ -218,30 +219,30 @@ class OpenClawCLI:
             if is_banner:
                 continue
 
-            # Ищем строку с ответом Киви (начинается с 🥝)
+            # Look for the Kiwi response line (starts with 🥝)
             if line_stripped.startswith('🥝'):
-                # Извлекаем текст после эмодзи и пробелов
+                # Extract text after emoji and spaces
                 response_text = line_stripped[1:].strip()
                 if response_text:
                     cleaned_lines.append(response_text)
             else:
                 cleaned_lines.append(line_stripped)
 
-        # Объединяем строки
+        # Join lines
         text = ' '.join(cleaned_lines).strip()
 
-        # Убираем markdown форматирование
+        # Remove markdown formatting
         text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
         text = re.sub(r'\*(.+?)\*', r'\1', text)
         text = re.sub(r'_(.+?)_', r'\1', text)
         text = re.sub(r'`(.+?)`', r'\1', text)
         text = re.sub(r'#+\s*', '', text)
 
-        # Убираем лишние пробелы
+        # Remove extra spaces
         while '  ' in text:
             text = text.replace('  ', ' ')
 
-        # Убираем начальное "Киви, " или "Киви " из ответа
+        # Remove leading "Киви, " or "Киви " from the response
         text_lower = text.lower()
         if text_lower.startswith('киви, '):
             text = text[6:].strip()

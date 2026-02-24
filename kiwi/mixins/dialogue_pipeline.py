@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 from kiwi.state_machine import DialogueState
 from kiwi.text_processing import quick_completeness_check, detect_emotion
 from kiwi.utils import kiwi_log
+from kiwi.i18n import t
 
 try:
     from kiwi.event_bus import EventType, get_event_bus
@@ -23,13 +24,17 @@ class CommandContext:
     command_lower: str = ""
     timestamp: float = 0.0
     speaker_id: str = "unknown"
-    speaker_name: str = "Незнакомец"
+    speaker_name: str = ""
     speaker_confidence: float = 0.0
     speaker_music_prob: float = 0.0
     is_owner: bool = False
     owner_profile_ready: bool = False
     approved_command_from_owner: Optional[str] = None
     abort: bool = False
+
+    def __post_init__(self):
+        if not self.speaker_name:
+            self.speaker_name = t("responses.unknown_speaker")
 
 
 class DialoguePipelineMixin:
@@ -89,7 +94,7 @@ class DialoguePipelineMixin:
         """Get speaker meta, log, show owner warning once."""
         speaker_meta = self._get_current_speaker_meta()
         ctx.speaker_id = str(speaker_meta.get("speaker_id", "unknown"))
-        ctx.speaker_name = str(speaker_meta.get("speaker_name", "Незнакомец"))
+        ctx.speaker_name = str(speaker_meta.get("speaker_name", t("responses.unknown_speaker")))
         ctx.speaker_confidence = float(speaker_meta.get("confidence", 0.0))
         ctx.speaker_music_prob = float(speaker_meta.get("music_probability", 0.0))
         ctx.is_owner = self._is_owner_speaker(speaker_meta)
@@ -122,18 +127,18 @@ class DialoguePipelineMixin:
         if self._pending_owner_approval and ctx.is_owner:
             if self._approval_yes(ctx.command_lower):
                 ctx.approved_command_from_owner = str(self._pending_owner_approval.get("command", "")).strip()
-                requester = str(self._pending_owner_approval.get("speaker_name", "кто-то"))
+                requester = str(self._pending_owner_approval.get("speaker_name", t("responses.unknown_speaker")))
                 self._pending_owner_approval = None
                 if ctx.approved_command_from_owner:
                     kiwi_log("APPROVAL", f"Approved by owner. Running deferred command from {requester}", level="INFO")
-                    self.speak(f"Принято. Выполняю запрос от {requester}.", style="confident")
+                    self.speak(t("responses.approval_accepted", requester=requester), style="confident")
                     ctx.command = ctx.approved_command_from_owner
                     ctx.command_lower = ctx.command.lower().strip()
             elif self._approval_no(ctx.command_lower):
-                requester = str(self._pending_owner_approval.get("speaker_name", "кто-то"))
+                requester = str(self._pending_owner_approval.get("speaker_name", t("responses.unknown_speaker")))
                 self._pending_owner_approval = None
                 kiwi_log("APPROVAL", f"Denied by owner. Requester={requester}", level="INFO")
-                self.speak(f"Хорошо, запрос от {requester} отклонён.", style="calm")
+                self.speak(t("responses.approval_denied", requester=requester), style="calm")
                 ctx.abort = True
 
     def _stage_handle_special_commands(self, ctx: CommandContext) -> None:
@@ -144,14 +149,14 @@ class DialoguePipelineMixin:
         if any(word in ctx.command_lower for word in reset_prompt_words):
             kiwi_log("KIWI", "Resetting system prompt...", level="INFO")
             self._system_prompt_sent = False
-            self.speak("Контекст сброшен. Начинаем новый разговор.", style="neutral")
+            self.speak(t("responses.context_cleared"), style="neutral")
             ctx.abort = True
             return
 
         if any(word in ctx.command_lower for word in calibrate_words):
             kiwi_log("KIWI", "Speaker ID calibration requested", level="INFO")
             self._self_profile_created = False
-            self.speak("Калибрую распознавание голоса.", style="neutral")
+            self.speak(t("responses.calibrating"), style="neutral")
             ctx.abort = True
             return
 
@@ -168,19 +173,19 @@ class DialoguePipelineMixin:
             if ctx.owner_profile_ready and not ctx.is_owner:
                 kiwi_log("SECURITY", f"Non-owner '{ctx.speaker_name}' attempted owner registration — DENIED", level="WARNING")
                 self._notify_owner_security_event(
-                    f"Попытка перерегистрации владельца от {ctx.speaker_name}: '{ctx.command}'"
+                    t("responses.owner_reregistration_attempt", speaker=ctx.speaker_name, command=ctx.command)
                 )
-                self.speak("Владелец уже зарегистрирован. Только он может изменить голосовой профиль.", style="calm")
+                self.speak(t("responses.owner_already_registered"), style="calm")
                 ctx.abort = True
                 return
             if hasattr(self.listener, "register_owner_voice"):
                 success = self.listener.register_owner_voice(self._owner_name)
                 if success:
-                    self.speak(f"Готово. Я запомнила голос владельца: {self._owner_name}.", style="cheerful")
+                    self.speak(t("responses.owner_registered", name=self._owner_name), style="cheerful")
                 else:
-                    self.speak("Не получилось сохранить профиль. Скажи фразу подлиннее и попробуй снова.", style="calm")
+                    self.speak(t("responses.owner_register_failed"), style="calm")
             else:
-                self.speak("Модуль профилей сейчас недоступен.", style="calm")
+                self.speak(t("responses.profiles_unavailable"), style="calm")
             ctx.abort = True
             return
 
@@ -188,7 +193,7 @@ class DialoguePipelineMixin:
             if hasattr(self.listener, "describe_last_speaker"):
                 self.speak(self.listener.describe_last_speaker(), style="neutral")
             else:
-                self.speak("Сейчас не могу определить говорящего.", style="calm")
+                self.speak(t("responses.cannot_identify"), style="calm")
             ctx.abort = True
             return
 
@@ -196,29 +201,29 @@ class DialoguePipelineMixin:
             if hasattr(self.listener, "describe_known_voices"):
                 self.speak(self.listener.describe_known_voices(), style="neutral")
             else:
-                self.speak("Список голосов недоступен.", style="calm")
+                self.speak(t("responses.voice_list_unavailable"), style="calm")
             ctx.abort = True
             return
 
         if "запомни меня как" in ctx.command_lower or "это мой друг" in ctx.command_lower:
             if ctx.owner_profile_ready and not ctx.is_owner:
                 kiwi_log("SECURITY", f"Non-owner '{ctx.speaker_name}' attempted to add friend — DENIED", level="WARNING")
-                self.speak("Только владелец может добавлять новых людей.", style="calm")
+                self.speak(t("responses.only_owner_can_add"), style="calm")
                 ctx.abort = True
                 return
             name = self._extract_name_from_voice_command(ctx.command)
             if not name:
-                self.speak("Скажи имя после фразы: запомни меня как ...", style="neutral")
+                self.speak(t("responses.say_name_prompt"), style="neutral")
                 ctx.abort = True
                 return
             if hasattr(self.listener, "remember_last_voice_as"):
                 success, _sid = self.listener.remember_last_voice_as(name)
                 if success:
-                    self.speak(f"Запомнила голос: {name}.", style="cheerful")
+                    self.speak(t("responses.voice_remembered", name=name), style="cheerful")
                 else:
-                    self.speak("Не удалось сохранить голос. Нужна более чёткая фраза.", style="calm")
+                    self.speak(t("responses.voice_save_failed"), style="calm")
             else:
-                self.speak("Модуль профилей сейчас недоступен.", style="calm")
+                self.speak(t("responses.profiles_unavailable"), style="calm")
             ctx.abort = True
             return
 
@@ -252,9 +257,9 @@ class DialoguePipelineMixin:
             return
 
         if cancelled:
-            self.speak("Остановила.", style="calm")
+            self.speak(t("responses.stopped"), style="calm")
         else:
-            self.speak("Нечего останавливать.", style="neutral")
+            self.speak(t("responses.nothing_to_stop"), style="neutral")
         ctx.abort = True
 
     def _stage_completeness_check(self, ctx: CommandContext) -> None:
@@ -316,17 +321,20 @@ class DialoguePipelineMixin:
 
             # Build approval hint based on available channels
             if ctx.owner_profile_ready and telegram_available:
-                approve_hint = "Скажи: разрешаю. Или подтвердите в Telegram."
+                approve_hint = t("responses.approval_prompt_voice_and_telegram")
             elif ctx.owner_profile_ready:
-                approve_hint = "Скажи: разрешаю или запрещаю."
+                approve_hint = t("responses.approval_prompt_voice")
             elif telegram_available:
-                approve_hint = "Подтвердите в Telegram."
+                approve_hint = t("responses.approval_prompt_telegram")
             else:
-                approve_hint = f"Зарегистрируйте голос владельца: Киви, я хозяин."
+                approve_hint = t("responses.approval_prompt_register")
 
             self.speak(
-                f"{self._owner_name}, {ctx.speaker_name} просит: {ctx.command}. "
-                f"{approve_hint}",
+                t("responses.approval_request",
+                  owner=self._owner_name,
+                  speaker=ctx.speaker_name,
+                  command=ctx.command,
+                  hint=approve_hint),
                 style="neutral",
             )
             self.listener.activate_dialog_mode()
@@ -401,7 +409,7 @@ class DialoguePipelineMixin:
             if self._task_status_announcer:
                 self._task_status_announcer.stop()
                 self._task_status_announcer = None
-            self.speak("Извини, не удалось отправить сообщение.", style="calm")
+            self.speak(t("responses.error_send_failed"), style="calm")
             self._set_state(DialogueState.IDLE)
         else:
             self._start_stream_watchdog(ctx.command)
@@ -448,7 +456,7 @@ class DialoguePipelineMixin:
         """Get metadata of the last utterance from listener."""
         default = {
             "speaker_id": "unknown",
-            "speaker_name": "Незнакомец",
+            "speaker_name": t("responses.unknown_speaker"),
             "priority": 2,
             "confidence": 0.0,
             "music_probability": 0.0,
@@ -516,20 +524,20 @@ class DialoguePipelineMixin:
         if not self._pending_owner_approval:
             return  # Already resolved by voice or expired
         command = self._pending_owner_approval.get("command", "")
-        speaker_name = self._pending_owner_approval.get("speaker_name", "кто-то")
+        speaker_name = self._pending_owner_approval.get("speaker_name", t("responses.unknown_speaker"))
         self._pending_owner_approval = None
         if approved:
-            self.speak(f"Telegram подтвердил. Выполняю запрос от {speaker_name}.", style="confident")
+            self.speak(t("responses.telegram_approved", requester=speaker_name), style="confident")
             ctx = CommandContext(command=command)
             ctx.command_lower = command.lower().strip()
             ctx.approved_command_from_owner = command
             self._stage_dispatch_to_llm(ctx)
         else:
-            self.speak(f"Запрос от {speaker_name} отклонён через Telegram.", style="calm")
+            self.speak(t("responses.telegram_denied", requester=speaker_name), style="calm")
 
     def _notify_owner_security_event(self, message):
         """Send security alerts to Telegram (no approval buttons)."""
         kiwi_log("SECURITY", message, level="WARNING")
         voice_security = getattr(self, '_voice_security', None)
         if voice_security:
-            voice_security.notify(f"\U0001f512 *Киви — Безопасность*\n\n{message}")
+            voice_security.notify(f"{t('security.telegram_security_title')}\n\n{message}")

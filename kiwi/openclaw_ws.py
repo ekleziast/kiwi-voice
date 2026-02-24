@@ -24,35 +24,36 @@ except ImportError:
         print(f"[{tag}] {message}", flush=True)
 
 from kiwi.config_loader import KiwiConfig
+from kiwi.i18n import t
 
 
 class OpenClawWebSocket:
-    """WebSocket клиент для streaming общения с OpenClaw Gateway v3.
+    """WebSocket client for streaming communication with OpenClaw Gateway v3.
 
-    Протокол:
-    1. Сервер шлёт connect.challenge event
-    2. Клиент отвечает connect request с ConnectParams
-    3. Сервер отвечает hello-ok
-    4. Клиент отправляет chat.send requests
-    5. Сервер шлёт chat events (delta/final/error/aborted)
+    Protocol:
+    1. Server sends connect.challenge event
+    2. Client responds with connect request containing ConnectParams
+    3. Server responds with hello-ok
+    4. Client sends chat.send requests
+    5. Server sends chat events (delta/final/error/aborted)
 
-    Поддерживает:
-    - Протокол OpenClaw Gateway v3
-    - Автоматическое переподключение с настраиваемым интервалом
-    - Логирование через kiwi_log
-    - Fallback на CLI при недоступности WebSocket
+    Supports:
+    - OpenClaw Gateway v3 protocol
+    - Automatic reconnection with configurable interval
+    - Logging via kiwi_log
+    - Fallback to CLI when WebSocket is unavailable
     """
 
     PROTOCOL_VERSION = 3
 
-    # Допустимые client.id (enum)
+    # Valid client.id values (enum)
     VALID_CLIENT_IDS = {
         "webchat-ui", "openclaw-control-ui", "webchat", "cli", "gateway-client",
         "openclaw-macos", "openclaw-ios", "openclaw-android", "node-host", "test",
         "fingerprint", "openclaw-probe"
     }
 
-    # Допустимые client.mode (enum)
+    # Valid client.mode values (enum)
     VALID_CLIENT_MODES = {
         "webchat", "cli", "ui", "backend", "node", "probe", "test"
     }
@@ -81,7 +82,7 @@ class OpenClawWebSocket:
         self._is_connected = False       # TCP connected
         self._is_authenticated = False   # Handshake complete (hello-ok received)
         self._is_streaming = False
-        self._is_processing = False      # Для совместимости с OpenClawCLI
+        self._is_processing = False      # For compatibility with OpenClawCLI
         self._accumulated_text = ""
         self._buffer_lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -118,7 +119,7 @@ class OpenClawWebSocket:
         self._deferred_final_lock = threading.Lock()
         self._lifecycle_final_debounce_s = 2.5
 
-        # Задержка перед отправкой накопленного текста в TTS (debounce)
+        # Delay before sending accumulated text to TTS (debounce)
         self._tts_debounce_ms = 150
         self._last_send_time = 0.0
         self._pending_text = ""
@@ -126,28 +127,28 @@ class OpenClawWebSocket:
         # Last user-friendly tool error (for fallback when abort has no text)
         self._last_tool_error = ""
 
-        # Ответ, полученный через WebSocket
+        # Response received via WebSocket
         self._full_response = ""
         self._response_event = threading.Event()
-        # Режим callback'ов: "streaming" или "blocking" (для OpenClawCLI-совместимого chat()).
+        # Callback mode: "streaming" or "blocking" (for OpenClawCLI-compatible chat()).
         self._callback_mode = "streaming"
 
-        # Auth event — ждём завершения handshake
+        # Auth event -- wait for handshake completion
         self._auth_event = threading.Event()
 
         self._log("OPENCLAW-WS", f"Initialized with host={config.ws_host}, port={config.ws_port}, session_key={self._session_key}")
 
     def _log_ws(self, message: str, level: str = "INFO"):
-        """Внутренний метод логирования."""
+        """Internal logging method."""
         if UTILS_AVAILABLE:
             kiwi_log("OPENCLAW-WS", message, level)
         else:
             print(f"[OPENCLAW-WS] {message}", flush=True)
 
     def _touch_stream_progress(self, stream: str):
-        """Сообщает внешнему watchdog, что по run пришла живая активность.
+        """Notify the external watchdog that live activity arrived for the run.
 
-        Важно: используем пустое сообщение, чтобы не озвучивать reasoning/tool детали.
+        Important: use an empty message to avoid speaking reasoning/tool details.
         """
         if not self.on_activity:
             return
@@ -161,14 +162,14 @@ class OpenClawWebSocket:
             self._log_ws(f"Progress callback error ({stream}): {e}", "DEBUG")
 
     def _load_gateway_token(self) -> str:
-        """Загружает gateway token из ~/.openclaw/openclaw.json или env."""
-        # 1. Из переменной окружения
+        """Load the gateway token from ~/.openclaw/openclaw.json or env."""
+        # 1. From environment variable
         token = os.getenv("OPENCLAW_GATEWAY_TOKEN")
         if token:
             self._log_ws(f"Gateway token loaded from env", "DEBUG")
             return token
 
-        # 2. Из ~/.openclaw/openclaw.json
+        # 2. From ~/.openclaw/openclaw.json
         config_path = os.path.join(os.path.expanduser("~"), ".openclaw", "openclaw.json")
         try:
             if os.path.exists(config_path):
@@ -187,17 +188,17 @@ class OpenClawWebSocket:
     # --- Device Identity (Ed25519) ---
 
     def _load_or_create_device_identity(self) -> dict:
-        """Загружает или генерирует Ed25519 ключевую пару для device auth.
+        """Load or generate an Ed25519 key pair for device auth.
 
-        Ключи сохраняются в ~/.openclaw/workspace/skills/kiwi-voice/device-identity.json
-        чтобы device ID оставался постоянным между перезапусками.
+        Keys are saved to ~/.openclaw/workspace/skills/kiwi-voice/device-identity.json
+        so the device ID remains persistent across restarts.
         """
         identity_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "device-identity.json",
         )
 
-        # Попробуем загрузить существующую identity
+        # Try to load existing identity
         if os.path.exists(identity_path):
             try:
                 with open(identity_path, "r", encoding="utf-8") as f:
@@ -208,7 +209,7 @@ class OpenClawWebSocket:
             except Exception as e:
                 self._log_ws(f"Failed to load device identity: {e}", "WARN")
 
-        # Генерируем новую
+        # Generate a new one
         private_key = ed25519.Ed25519PrivateKey.generate()
         public_key = private_key.public_key()
 
@@ -239,9 +240,9 @@ class OpenClawWebSocket:
         return data
 
     def _build_device_auth(self, nonce: str) -> dict:
-        """Строит device auth объект для connect request.
+        """Build the device auth object for the connect request.
 
-        Формат payload (v2):
+        Payload format (v2):
           v2|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce
         """
         identity = self._device_identity
@@ -261,7 +262,7 @@ class OpenClawWebSocket:
         ]
         payload = "|".join(payload_parts)
 
-        # Подписываем Ed25519
+        # Sign with Ed25519
         priv_bytes = base64.urlsafe_b64decode(identity["privateKey"] + "==")
         private_key = ed25519.Ed25519PrivateKey.from_private_bytes(priv_bytes)
         signature = private_key.sign(payload.encode("utf-8"))
@@ -276,20 +277,20 @@ class OpenClawWebSocket:
         }
 
     def _get_ws_url(self) -> str:
-        """Формирует URL для WebSocket подключения (без пути!)."""
+        """Build the URL for WebSocket connection (no path!)."""
         return f"ws://{self.config.ws_host}:{self.config.ws_port}"
 
     def connect(self) -> bool:
-        """Устанавливает WebSocket соединение с OpenClaw Gateway v3.
+        """Establish a WebSocket connection to OpenClaw Gateway v3.
 
-        Протокол:
-        1. TCP connect → on_open
-        2. Ждём connect.challenge event от сервера
-        3. Отправляем connect request с ConnectParams
-        4. Ждём hello-ok response
+        Protocol:
+        1. TCP connect -> on_open
+        2. Wait for connect.challenge event from server
+        3. Send connect request with ConnectParams
+        4. Wait for hello-ok response
 
         Returns:
-            True если подключение и аутентификация успешны, False иначе
+            True if connection and authentication succeed, False otherwise
         """
         if self._is_authenticated:
             return True
@@ -298,7 +299,7 @@ class OpenClawWebSocket:
             self._log_ws("Cannot connect: stop event is set", "WARN")
             return False
 
-        # Сбрасываем состояние аутентификации
+        # Reset authentication state
         self._is_authenticated = False
         self._auth_event.clear()
 
@@ -330,7 +331,7 @@ class OpenClawWebSocket:
                 if not self._stop_event.is_set():
                     reason = f"connection closed: code={close_status_code}, msg={close_msg}"
                     self._fail_active_request(reason)
-                # Запускаем переподключение
+                # Schedule reconnection
                 if close_status_code not in (1000,):
                     self._schedule_reconnect()
 
@@ -339,9 +340,9 @@ class OpenClawWebSocket:
                 self._is_connected = True
                 self._reconnect_attempts = 0
                 self._last_connect_time = time.time()
-                # НЕ отправляем handshake сразу! Ждём connect.challenge от сервера.
+                # Do NOT send handshake immediately! Wait for connect.challenge from server.
 
-            # WebSocket без кастомных заголовков (протокол v3 не требует)
+            # WebSocket without custom headers (protocol v3 does not require them)
             self._ws = websocket.WebSocketApp(
                 ws_url,
                 on_open=on_open,
@@ -350,7 +351,7 @@ class OpenClawWebSocket:
                 on_close=on_close,
             )
 
-            # Запускаем WebSocket в отдельном потоке
+            # Run WebSocket in a separate thread
             self._ws_thread = threading.Thread(
                 target=lambda: self._ws.run_forever(
                     ping_interval=max(0.0, float(self.config.ws_ping_interval)),
@@ -360,7 +361,7 @@ class OpenClawWebSocket:
             )
             self._ws_thread.start()
 
-            # Ждём полной аутентификации (TCP + challenge + hello-ok)
+            # Wait for full authentication (TCP + challenge + hello-ok)
             auth_timeout = 15.0
             self._log_ws(f"Waiting for authentication (timeout={auth_timeout}s)...", "DEBUG")
 
@@ -368,7 +369,7 @@ class OpenClawWebSocket:
                 self._log_ws("Fully authenticated with Gateway v3", "INFO")
                 return True
             else:
-                # Проверяем, подключились ли хотя бы по TCP
+                # Check if we connected at least via TCP
                 if self._is_connected:
                     self._log_ws(f"Auth timeout after {auth_timeout}s (TCP ok, but no hello-ok)", "WARN")
                 else:
@@ -383,7 +384,7 @@ class OpenClawWebSocket:
             return False
 
     def _schedule_reconnect(self):
-        """Планирует переподключение в отдельном потоке."""
+        """Schedule reconnection in a separate thread."""
         if self._stop_event.is_set():
             return
 
@@ -391,7 +392,7 @@ class OpenClawWebSocket:
             return  # Already connected and authenticated, no reconnect needed
 
         if self._reconnect_thread and self._reconnect_thread.is_alive():
-            return  # Уже переподключаемся
+            return  # Already reconnecting
 
         self._reconnect_attempts += 1
         if self._reconnect_attempts > self.config.ws_max_reconnect_attempts:
@@ -442,11 +443,11 @@ class OpenClawWebSocket:
         return ok
 
     def _handle_message(self, message: str):
-        """Обрабатывает сообщения от WebSocket по протоколу Gateway v3.
+        """Handle messages from WebSocket according to Gateway v3 protocol.
 
-        Типы фреймов:
-        - "event" → connect.challenge, chat events, etc.
-        - "res"   → ответы на наши requests (connect, chat.send, chat.abort)
+        Frame types:
+        - "event" -> connect.challenge, chat events, etc.
+        - "res"   -> responses to our requests (connect, chat.send, chat.abort)
         """
         try:
             self._last_ws_recv_ts = time.time()
@@ -468,7 +469,7 @@ class OpenClawWebSocket:
             self._log_ws(f"Message handling error: {e}", "ERROR")
 
     def _fail_active_request(self, reason: str):
-        """Завершает активный запрос ошибкой, чтобы не зависать при обрыве WS."""
+        """Fail the active request with an error to avoid hanging on WS disconnect."""
         if not (self._is_processing or self._is_streaming):
             return
 
@@ -481,23 +482,17 @@ class OpenClawWebSocket:
         if acquired:
             try:
                 if not self._full_response:
-                    self._full_response = (
-                        "Извини, соединение с OpenClaw прервалось. "
-                        "Повтори запрос."
-                    )
+                    self._full_response = t("ws_errors.connection_lost")
             finally:
                 self._buffer_lock.release()
         else:
             self._log_ws("_fail_active_request: _buffer_lock timeout (3s)", "WARNING")
             if not self._full_response:
-                self._full_response = (
-                    "Извини, соединение с OpenClaw прервалось. "
-                    "Повтори запрос."
-                )
+                self._full_response = t("ws_errors.connection_lost")
 
         self._response_event.set()
 
-        # В streaming-режиме подаём completion, чтобы остановить StreamingTTSManager.
+        # In streaming mode, fire completion to stop StreamingTTSManager.
         if self._callback_mode == "streaming" and self.on_complete:
             try:
                 self.on_complete(self._full_response)
@@ -505,13 +500,13 @@ class OpenClawWebSocket:
                 self._log_ws(f"on_complete after failure error: {e}", "DEBUG")
 
     def _handle_event(self, data: dict):
-        """Обрабатывает event-фреймы от сервера."""
+        """Handle event frames from the server."""
         event_name = str(data.get("event", "")).strip().lower()
         payload = data.get("payload", {})
         seq = data.get("seq", -1)
 
         if event_name == "connect.challenge":
-            # Шаг 1 протокола: сервер прислал challenge
+            # Protocol step 1: server sent challenge
             nonce = payload.get("nonce", "")
             ts = payload.get("ts", 0)
             self._log_ws(f"Received connect.challenge (nonce={nonce[:16]}..., ts={ts})", "INFO")
@@ -528,17 +523,17 @@ class OpenClawWebSocket:
             self._log_ws(f"Event: {event_name} (seq={seq})", "DEBUG")
 
     def _handle_response(self, data: dict):
-        """Обрабатывает response-фреймы (ответы на наши requests)."""
+        """Handle response frames (replies to our requests)."""
         req_id = data.get("id", "")
         ok = data.get("ok", False)
         payload = data.get("payload", {})
 
-        # Проверяем, есть ли pending request с таким id
+        # Check if there is a pending request with this id
         with self._pending_lock:
             pending = self._pending_requests.get(req_id)
 
         if pending:
-            # Сохраняем результат и сигнализируем
+            # Save the result and signal
             pending["ok"] = ok
             pending["payload"] = payload
             pending["event"].set()
@@ -546,7 +541,7 @@ class OpenClawWebSocket:
             if ok:
                 payload_type = payload.get("type", "")
                 if payload_type == "hello-ok":
-                    # Handshake завершён успешно!
+                    # Handshake completed successfully!
                     protocol = payload.get("protocol", 0)
                     self._log_ws(f"Authenticated! Protocol v{protocol}, hello-ok received", "INFO")
                     self._is_authenticated = True
@@ -576,15 +571,15 @@ class OpenClawWebSocket:
             self._log_ws(f"Response for unknown request {req_id}: ok={ok}", "WARN")
 
     def _extract_text_from_delta(self, content: str) -> str:
-        """Извлекает текст из delta content, который может быть строковым dict'ом или списком.
+        """Extract text from delta content, which may be a stringified dict or list.
 
-        ЧИСТЫЙ REGEX — без ast.literal_eval для избежания проблем с форматированием.
+        Pure regex -- no ast.literal_eval to avoid formatting issues.
 
-        Обрабатывает случаи:
-        - [{'type': 'text', 'text': '...'}] (список с одним dict)
-        - {'type': 'text', 'text': '...'} (одиночный dict)
-        - Конкатенацию нескольких dict'ов: {'type': 'text', 'text': 'С'}{'type': 'text', 'text': 'О'}
-        - Смешанный контент: текст + dict'ы
+        Handles cases:
+        - [{'type': 'text', 'text': '...'}] (list with one dict)
+        - {'type': 'text', 'text': '...'} (single dict)
+        - Concatenation of multiple dicts: {'type': 'text', 'text': 'A'}{'type': 'text', 'text': 'B'}
+        - Mixed content: text + dicts
         """
         if not isinstance(content, str):
             return str(content) if content else ""
@@ -593,22 +588,22 @@ class OpenClawWebSocket:
         if not stripped:
             return ""
 
-        # Если это обычный текст без паттернов dict — возвращаем как есть
+        # If this is plain text without dict patterns -- return as is
         if not (("'text'" in stripped or '"text"' in stripped) and
                 (stripped.startswith('{') or stripped.startswith('['))):
             return content
 
         import re
 
-        # Случай 1: Список с dict'ами [{'type': 'text', 'text': '...'}]
-        # Используем regex для извлечения всех dict'ов из списка
+        # Case 1: List with dicts [{'type': 'text', 'text': '...'}]
+        # Use regex to extract all dicts from the list
         if stripped.startswith('[') and stripped.endswith(']'):
-            # Ищем все dict'ы внутри списка: {...}
+            # Find all dicts inside the list: {...}
             dict_matches = re.findall(r'\{[^{}]*\}', stripped)
             if dict_matches:
                 texts = []
                 for dict_str in dict_matches:
-                    # Ищем 'text': '...' или "text": "..."
+                    # Look for 'text': '...' or "text": "..."
                     text_match = re.search(r"'text':\s*'([^']*?)'", dict_str)
                     if text_match:
                         texts.append(text_match.group(1))
@@ -619,27 +614,27 @@ class OpenClawWebSocket:
                 if texts:
                     return "".join(texts)
 
-        # Случай 2 & 3: Одиночный dict или конкатенация dict'ов
-        # Ищем все вхождения 'text': '...' (с одинарными кавычками)
+        # Case 2 & 3: Single dict or concatenation of dicts
+        # Find all occurrences of 'text': '...' (with single quotes)
         matches = re.findall(r"'text':\s*'([^']*?)'", content)
         if matches:
             result = "".join(matches)
             if result:
                 return result
 
-        # Ищем с двойными кавычками "text": "..."
+        # Look for double quotes "text": "..."
         matches = re.findall(r'"text":\s*"([^"]*?)"', content)
         if matches:
             result = "".join(matches)
             if result:
                 return result
 
-        # Случай 4: Разбиваем по }{ и ищем text в каждой части
+        # Case 4: Split by }{ and look for text in each part
         if '}{' in content:
             parts = content.split('}{')
             texts = []
             for i, part in enumerate(parts):
-                # Добавляем скобки обратно
+                # Add braces back
                 if i == 0:
                     part = part + '}'
                 elif i == len(parts) - 1:
@@ -647,7 +642,7 @@ class OpenClawWebSocket:
                 else:
                     part = '{' + part + '}'
 
-                # Ищем text с помощью regex (без ast.literal_eval)
+                # Look for text using regex (no ast.literal_eval)
                 text_match = re.search(r"'text':\s*'([^']*?)'", part)
                 if text_match:
                     texts.append(text_match.group(1))
@@ -659,18 +654,18 @@ class OpenClawWebSocket:
             if texts:
                 return "".join(texts)
 
-        # Если ничего не сработало — возвращаем как есть
+        # If nothing worked -- return as is
         return content
 
     def _normalize_chat_content(self, content) -> str:
-        """Нормализует chat content (dict/list/str) в plain text."""
+        """Normalize chat content (dict/list/str) to plain text."""
         if content is None:
             return ""
 
-        # content может быть dict {'type': 'text', 'text': '...'}
+        # content may be a dict {'type': 'text', 'text': '...'}
         if isinstance(content, dict):
             content = content.get('text', content.get('content', ""))
-        # content может быть list (например, [{'type': 'text', 'text': '...'}])
+        # content may be a list (e.g. [{'type': 'text', 'text': '...'}])
         elif isinstance(content, list):
             texts = []
             for item in content:
@@ -685,15 +680,15 @@ class OpenClawWebSocket:
         return str(content) if content else ""
 
     def _extract_text_from_payload(self, payload: dict, state: str) -> str:
-        """Извлекает текст из разных форматов payload (устойчиво к изменениям протокола)."""
+        """Extract text from various payload formats (resilient to protocol changes)."""
         candidates = []
 
-        # Основной путь (текущая схема)
+        # Primary path (current schema)
         message_data = payload.get("message", {})
         if isinstance(message_data, dict) and "content" in message_data:
             candidates.append(message_data.get("content"))
 
-        # Fallback-поля, которые встречаются в разных реализациях chat событий
+        # Fallback fields found in various chat event implementations
         for key in ("content", "text", "delta", "output", "answer", "response", "final", "result", "data"):
             if key in payload:
                 candidates.append(payload.get(key))
@@ -707,14 +702,14 @@ class OpenClawWebSocket:
         if not normalized:
             return ""
 
-        # Для delta/final выбираем самый содержательный вариант
+        # For delta/final pick the most informative variant
         if state in ("delta", "final"):
             return max(normalized, key=len)
 
         return normalized[0]
 
     def _emit_activity(self, activity_type: str, message: str, details: Optional[dict] = None):
-        """Передаёт событие активности в сервис, если подключен callback."""
+        """Pass an activity event to the service if a callback is connected."""
         if not self.on_activity or not message:
             return
         try:
@@ -767,42 +762,42 @@ class OpenClawWebSocket:
         phase = str(data.get("phase", data.get("status", data.get("state", "")))).lower()
 
         if phase in ("error", "failed", "fail"):
-            return "Инструмент вернул ошибку, проверяю причину."
+            return t("tool_activity.tool_error")
         if phase in ("end", "done", "complete", "completed", "success", "ok"):
             return ""
 
         if command:
             cmd = command.lower()
             if re.search(r"\bcd\b", cmd) or "set-location" in cmd:
-                return "Открываю нужную папку проекта."
+                return t("tool_activity.opening_folder")
             if "get-childitem" in cmd or re.search(r"\brg\b", cmd) or " --files" in cmd or re.search(r"\bls\b", cmd):
-                return "Смотрю структуру проекта и ищу нужные файлы."
+                return t("tool_activity.browsing_structure")
             if "get-content" in cmd or re.search(r"\bcat\b", cmd) or re.search(r"\bsed\b", cmd):
                 match = re.search(r"(?:get-content|cat)\s+([^\s|;]+)", command, re.IGNORECASE)
                 if match:
                     path = match.group(1).strip("'\"")
-                    return f"Анализирую файл {path}."
-                return "Читаю и анализирую код файлов."
+                    return t("tool_activity.analyzing_file", path=path)
+                return t("tool_activity.reading_code")
             if "select-string" in cmd or re.search(r"\brg\s+-n\b", cmd):
-                return "Ищу нужные места в коде."
+                return t("tool_activity.searching_code")
             if "pytest" in cmd or "py_compile" in cmd or "npm test" in cmd or "cargo test" in cmd:
-                return "Проверяю код и прогоняю проверки."
+                return t("tool_activity.running_tests")
             if "apply_patch" in cmd or "*** begin patch" in cmd:
-                return "Вношу изменения в код."
+                return t("tool_activity.editing_code")
             if re.search(r"\bgit\s+", cmd):
-                return "Проверяю изменения в репозитории."
-            return "Выполняю шаги в проекте."
+                return t("tool_activity.checking_repo")
+            return t("tool_activity.project_steps")
 
         if "shell_command" in tool_name:
-            return "Выполняю команду в терминале."
+            return t("tool_activity.running_command")
         if "apply_patch" in tool_name:
-            return "Вношу изменения в код."
+            return t("tool_activity.editing_code")
         if "read" in tool_name or "open" in tool_name:
-            return "Читаю файлы проекта."
+            return t("tool_activity.reading_files")
         if "search" in tool_name or "find" in tool_name:
-            return "Ищу нужную информацию в коде."
+            return t("tool_activity.searching_info")
 
-        return "Продолжаю работу над задачей."
+        return t("tool_activity.continuing_work")
 
     def _classify_tool_error(self, data: dict) -> str:
         """Extract user-friendly Russian message from a tool error event."""
@@ -839,49 +834,43 @@ class OpenClawWebSocket:
             or "extension" in error_lower
             or error_code == "UNAVAILABLE"
         ):
-            return (
-                "Расширение OpenClaw в браузере не подключено. "
-                "Нужно открыть расширение на активной вкладке."
-            )
+            return t("tool_errors.browser_not_connected")
 
         # Generic UNAVAILABLE
         if error_code == "UNAVAILABLE":
-            friendly_name = tool_name or "сервис"
-            return f"Инструмент {friendly_name} сейчас недоступен."
+            friendly_name = tool_name or t("tool_errors.default_tool_name")
+            return t("tool_errors.tool_unavailable", name=friendly_name)
 
         return ""
 
     def _user_friendly_error(self, error_msg: str) -> str:
-        """Translate known errorMessage patterns to user-friendly Russian."""
+        """Translate known errorMessage patterns to user-friendly text."""
         lower = error_msg.lower()
 
         if ("no tab is connected" in lower or "extension" in lower) and "browser" in lower:
-            return (
-                "Расширение OpenClaw в браузере не подключено. "
-                "Нужно открыть расширение на активной вкладке."
-            )
+            return t("tool_errors.browser_not_connected")
 
         if "timeout" in lower or "timed out" in lower:
-            return "Запрос занял слишком много времени. Повтори, пожалуйста."
+            return t("tool_errors.timeout")
 
         if "rate limit" in lower or "too many requests" in lower:
-            return "Слишком много запросов. Подожди немного и повтори."
+            return t("tool_errors.rate_limit")
 
         if "unauthorized" in lower or "authentication" in lower or "forbidden" in lower:
-            return "Ошибка авторизации. Проверь настройки подключения."
+            return t("tool_errors.auth_error")
 
         # Fallback: wrap the raw message
-        return f"Ошибка: {error_msg}"
+        return t("tool_errors.generic_error", error=error_msg)
 
     def _handle_agent_event(self, payload: dict):
-        """Преобразует native agent stream events в chat-like события для единого пайплайна."""
+        """Convert native agent stream events into chat-like events for the unified pipeline."""
         run_id = payload.get("runId", "")
         session_key = payload.get("sessionKey", "")
         stream = str(payload.get("stream", "")).strip().lower()
         data = payload.get("data", {})
         seq = payload.get("seq", -1)
 
-        # Игнорируем события от чужих сессий.
+        # Ignore events from foreign sessions.
         if session_key and session_key != self._session_key:
             self._log_ws(
                 f"Ignoring agent event for foreign sessionKey={session_key} "
@@ -900,9 +889,9 @@ class OpenClawWebSocket:
             )
             return
 
-        # Некоторые рантаймы стримят рассуждения отдельным потоком (thinking/reasoning),
-        # и между текстовыми assistant-delta может проходить заметное время.
-        # Отмечаем такую активность, чтобы watchdog не делал ложный stall/retry.
+        # Some runtimes stream reasoning as a separate stream (thinking/reasoning),
+        # and a noticeable gap may occur between assistant-delta text tokens.
+        # Mark this activity so the watchdog does not trigger a false stall/retry.
         if stream in ("thinking", "reasoning", "compaction"):
             self._cancel_deferred_final()  # agent is still working
             self._touch_stream_progress(stream)
@@ -912,8 +901,8 @@ class OpenClawWebSocket:
             # from a previous lifecycle:end (multi-wave response continues).
             self._cancel_deferred_final()
 
-            # В OpenClaw canonical поле для chat-bridge — data.text (см. server-chat.ts).
-            # data.delta используем только как fallback.
+            # In OpenClaw the canonical field for chat-bridge is data.text (see server-chat.ts).
+            # data.delta is used only as a fallback.
             assistant_content = data.get("text", data.get("content", ""))
             if assistant_content is None or assistant_content == "":
                 assistant_content = data.get("delta", "")
@@ -930,13 +919,13 @@ class OpenClawWebSocket:
 
         if stream == "lifecycle":
             phase = str(data.get("phase", "")).strip().lower()
-            # Любое lifecycle-событие — признак активности, обновляем watchdog.
+            # Any lifecycle event indicates activity, update the watchdog.
             self._touch_stream_progress(f"lifecycle:{phase}")
             # Suppress immediate start announcement for short requests.
             if phase in ("thinking", "plan", "planning"):
                 # Agent starting a new thinking step — cancel pending final
                 self._cancel_deferred_final()
-                self._emit_activity("lifecycle", "Планирую шаги решения.", {"phase": phase})
+                self._emit_activity("lifecycle", t("tool_activity.planning"), {"phase": phase})
 
             if phase in ("end", "done", "complete", "completed", "finish", "finished"):
                 # Don't fire final immediately — the agent may continue with
@@ -956,7 +945,7 @@ class OpenClawWebSocket:
 
             if phase in ("error", "failed", "fail"):
                 self._cancel_deferred_final()  # error overrides any pending final
-                self._emit_activity("lifecycle", "Возникла ошибка, проверяю что случилось.", {"phase": phase})
+                self._emit_activity("lifecycle", t("tool_activity.error_checking"), {"phase": phase})
                 err = data.get("error") or data.get("message") or data.get("reason") or "Unknown lifecycle error"
                 self._handle_chat_event({
                     "runId": run_id,
@@ -1005,15 +994,15 @@ class OpenClawWebSocket:
                     self._last_tool_error = friendly
                     self._log_ws(f"Tool error classified: {friendly}", "INFO")
 
-            # Обновляем watchdog — tool вызовы означают, что LLM работает,
-            # даже если текстовых токенов ещё нет.
+            # Update watchdog -- tool calls mean the LLM is working,
+            # even if no text tokens have arrived yet.
             self._touch_stream_progress(stream)
             tool_msg = self._describe_tool_activity(data)
             if tool_msg:
                 self._emit_activity("tool", tool_msg, {"stream": stream})
             return
 
-        # tool/compaction/reasoning и прочие служебные потоки в голосовой ответ не конвертируем.
+        # tool/compaction/reasoning and other internal streams are not converted to voice responses.
         if stream not in ("compaction",):
             self._log_ws(f"Agent stream ignored: {stream}", "DEBUG")
 
@@ -1103,8 +1092,8 @@ class OpenClawWebSocket:
         self._handle_chat_event(synthetic)
 
     def _handle_chat_event(self, payload: dict):
-        """Обрабатывает chat events (delta/final/error/aborted)."""
-        # Некоторые шлюзы используют state, некоторые status
+        """Handle chat events (delta/final/error/aborted)."""
+        # Some gateways use state, some use status
         raw_state = payload.get("state", payload.get("status", ""))
         state = str(raw_state).strip().lower() if raw_state is not None else ""
         state_alias = {
@@ -1121,7 +1110,7 @@ class OpenClawWebSocket:
         }
         state = state_alias.get(state, state)
 
-        # Игнорируем пустые state (промежуточные события от Gateway)
+        # Ignore empty state (intermediate events from Gateway)
         if not state:
             if payload:
                 self._log_ws(
@@ -1134,7 +1123,7 @@ class OpenClawWebSocket:
         session_key = payload.get("sessionKey", "")
         content = self._extract_text_from_payload(payload, state)
 
-        # Игнорируем события от чужих сессий (другие агенты на том же Gateway).
+        # Ignore events from foreign sessions (other agents on the same Gateway).
         if session_key and session_key != self._session_key:
             self._log_ws(
                 f"Ignoring event for foreign sessionKey={session_key} (mine={self._session_key}, state={state})",
@@ -1142,7 +1131,7 @@ class OpenClawWebSocket:
             )
             return
 
-        # Игнорируем события от предыдущих/чужих runId, если уже знаем активный runId.
+        # Ignore events from previous/foreign runIds if we already know the active runId.
         if run_id and self._current_run_id and run_id != self._current_run_id:
             self._log_ws(
                 f"Ignoring event for stale runId={run_id} (active={self._current_run_id}, state={state})",
@@ -1150,16 +1139,16 @@ class OpenClawWebSocket:
             )
             return
 
-        # === ДИАГНОСТИКА: логируем raw payload для terminal событий ===
+        # === DIAGNOSTICS: log raw payload for terminal events ===
         if state == "final":
             self._log_ws(f"RAW final payload: {json.dumps(payload, ensure_ascii=False)[:500]}...", "DEBUG")
 
-        # === ДИАГНОСТИКА: логируем raw content для отладки ===
+        # === DIAGNOSTICS: log raw content for debugging ===
         if state == "delta" and content:
             raw_preview = str(content)[:100].replace('\n', ' ')
             self._log_ws(f"Raw delta content: {raw_preview}...", "DEBUG")
 
-        # === ДИАГНОСТИКА: логируем результат очистки ===
+        # === DIAGNOSTICS: log cleaned result ===
         if state == "delta" and content:
             cleaned_preview = content[:100].replace('\n', ' ')
             self._log_ws(f"Cleaned delta content: {cleaned_preview}...", "DEBUG")
@@ -1172,11 +1161,11 @@ class OpenClawWebSocket:
             # (direct gateway delta, not just agent stream).
             self._cancel_deferred_final()
 
-            # Частичный ответ (streaming token)
-            # ВАЖНО: разные провайдеры могут присылать delta в двух форматах:
-            # 1) cumulative: content = весь накопленный текст
-            # 2) incremental: content = только новый кусок
-            # Делаем сборку, устойчивую к обоим форматам.
+            # Partial response (streaming token)
+            # IMPORTANT: different providers may send delta in two formats:
+            # 1) cumulative: content = all accumulated text so far
+            # 2) incremental: content = only the new chunk
+            # Build assembly that handles both formats.
             if content:
                 new_text = ""
                 acquired = self._buffer_lock.acquire(timeout=5.0)
@@ -1185,18 +1174,18 @@ class OpenClawWebSocket:
                 try:
                     prev_text = self._accumulated_text
 
-                    # Формат 1: cumulative (новый content начинается с уже накопленного текста)
+                    # Format 1: cumulative (new content starts with already accumulated text)
                     if content.startswith(self._accumulated_text):
                         new_text = content[len(self._accumulated_text):]
                         updated_text = content
-                    # Если прислали старый/укороченный snapshot — не дублируем
+                    # If an old/truncated snapshot was sent -- do not duplicate
                     elif self._accumulated_text.startswith(content):
                         new_text = ""
                         updated_text = self._accumulated_text
                     else:
-                        # Формат 2: incremental или частичное рассинхронирование.
-                        # Пробуем найти overlap (суффикс prev == префикс content),
-                        # чтобы не дублировать символы при склейке.
+                        # Format 2: incremental or partial desynchronization.
+                        # Try to find overlap (suffix of prev == prefix of content)
+                        # to avoid duplicating characters when concatenating.
                         overlap = 0
                         max_overlap = min(len(prev_text), len(content))
                         for i in range(max_overlap, 0, -1):
@@ -1207,16 +1196,16 @@ class OpenClawWebSocket:
                         if overlap > 0:
                             new_text = content[overlap:]
                         else:
-                            # Нет overlap: считаем это чисто новым инкрементом
+                            # No overlap: treat as a purely new increment
                             new_text = content
 
                         updated_text = prev_text + new_text
 
-                    # Обновляем накопленный текст (append-friendly)
+                    # Update accumulated text (append-friendly)
                     self._accumulated_text = updated_text
                     self._full_response = updated_text
 
-                    # Логируем реальный инкремент и общий размер после сборки
+                    # Log the actual increment and cumulative size after assembly
                     self._log_ws(
                         f"Chat delta: +{len(new_text)} chars (cumulative: {len(updated_text)})",
                         "DEBUG"
@@ -1239,15 +1228,15 @@ class OpenClawWebSocket:
                     if len(self._seen_final_run_ids) > 500:
                         self._seen_final_run_ids.clear()
 
-            # Финальный полный ответ
+            # Final complete response
             if content:
                 with self._buffer_lock:
-                    # final содержит полный текст — перезаписываем
+                    # final contains the full text -- overwrite
                     self._full_response = content
 
                 self._log_ws(f"Chat final: {len(content)} chars", "INFO")
             else:
-                # FALLBACK: если final пришёл с пустым content, но есть накопленный текст от delta
+                # FALLBACK: if final arrived with empty content, but there is accumulated text from delta
                 with self._buffer_lock:
                     if self._accumulated_text and not self._full_response:
                         self._full_response = self._accumulated_text
@@ -1267,8 +1256,8 @@ class OpenClawWebSocket:
                         self._current_run_id = None
                         return
 
-            # Вызываем on_complete только для финального ответа
-            # Это остановит StreamingTTSManager и отправит остаток буфера
+            # Call on_complete only for the final response
+            # This will stop StreamingTTSManager and flush the remaining buffer
             if self._callback_mode == "streaming" and self.on_complete:
                 self.on_complete(self._full_response)
 
@@ -1282,7 +1271,7 @@ class OpenClawWebSocket:
             self._is_streaming = False
             self._is_processing = False
 
-            # Сохраняем ошибку как ответ (переводим в понятное сообщение)
+            # Save error as a response (translate to a user-friendly message)
             with self._buffer_lock:
                 if not self._full_response:
                     self._full_response = self._user_friendly_error(error_msg)
@@ -1311,12 +1300,12 @@ class OpenClawWebSocket:
                         if self._last_tool_error:
                             self._full_response = self._last_tool_error
                         else:
-                            self._full_response = "Запрос был прерван. Повтори, пожалуйста."
+                            self._full_response = t("ws_errors.request_aborted")
                 self.on_complete(self._full_response)
 
             self._response_event.set()
         else:
-            # Неизвестное состояние логируем явно, чтобы видеть формат gateway.
+            # Log unknown state explicitly to see the gateway format.
             # Treat any unrecognized state as terminal to prevent hanging forever
             # (watchdog would eventually time out, but this is faster).
             self._log_ws(
@@ -1336,9 +1325,9 @@ class OpenClawWebSocket:
             self._response_event.set()
 
     def _send_connect(self, nonce: str):
-        """Отправляет connect request с правильными ConnectParams (протокол v3).
+        """Send a connect request with correct ConnectParams (protocol v3).
 
-        ВАЖНО: additionalProperties: false — нельзя добавлять лишние поля!
+        IMPORTANT: additionalProperties: false -- no extra fields allowed!
         """
         import platform
 
@@ -1371,7 +1360,7 @@ class OpenClawWebSocket:
             "params": connect_params
         }
 
-        # Регистрируем pending request
+        # Register pending request
         with self._pending_lock:
             self._pending_requests[req_id] = {
                 "event": threading.Event(),
@@ -1389,15 +1378,15 @@ class OpenClawWebSocket:
                 self._pending_requests.pop(req_id, None)
 
     def _request(self, method: str, params: dict, timeout: float = 30.0) -> dict:
-        """Отправляет request и ждёт response (блокирующий).
+        """Send a request and wait for a response (blocking).
 
         Args:
-            method: Имя метода (e.g. "chat.send", "chat.abort")
-            params: Параметры запроса
-            timeout: Таймаут ожидания ответа
+            method: Method name (e.g. "chat.send", "chat.abort")
+            params: Request parameters
+            timeout: Response wait timeout
 
         Returns:
-            {"ok": bool, "payload": dict} или {"ok": False, "error": str}
+            {"ok": bool, "payload": dict} or {"ok": False, "error": str}
         """
         if not self._is_authenticated:
             return {"ok": False, "error": "Not authenticated"}
@@ -1411,7 +1400,7 @@ class OpenClawWebSocket:
             "params": params
         }
 
-        # Регистрируем pending request
+        # Register pending request
         pending_event = threading.Event()
         with self._pending_lock:
             self._pending_requests[req_id] = {
@@ -1429,7 +1418,7 @@ class OpenClawWebSocket:
                 self._pending_requests.pop(req_id, None)
             return {"ok": False, "error": f"Send failed: {e}"}
 
-        # Ждём ответ
+        # Wait for response
         if pending_event.wait(timeout=timeout):
             with self._pending_lock:
                 result = self._pending_requests.pop(req_id, {})
@@ -1441,18 +1430,18 @@ class OpenClawWebSocket:
 
     def chat(self, message: str) -> str:
 
-        """Отправляет сообщение и ожидает полный ответ (блокирующий вызов).
+        """Send a message and wait for the full response (blocking call).
 
-        Использует протокол Gateway v3: chat.send request + chat events.
-        Совместим с интерфейсом OpenClawCLI.chat()
+        Uses the Gateway v3 protocol: chat.send request + chat events.
+        Compatible with the OpenClawCLI.chat() interface.
 
         Args:
-            message: Сообщение для отправки
+            message: Message to send
 
         Returns:
-            Полный текст ответа или сообщение об ошибке
+            Full response text or error message
         """
-        # Сбрасываем состояние
+        # Reset state
         with self._buffer_lock:
             self._full_response = ""
             self._accumulated_text = ""
@@ -1461,28 +1450,28 @@ class OpenClawWebSocket:
         self._is_streaming = True
         self._current_run_id = None
 
-        # Отправляем сообщение через chat.send
+        # Send message via chat.send
         if not self.send_message(message, callback_mode="blocking"):
             self._is_processing = False
             self._is_streaming = False
-            return "Ошибка: не удалось отправить сообщение через WebSocket"
+            return t("ws_errors.send_failed")
 
-        # Ждём завершения (final/error/aborted event) с таймаутом
+        # Wait for completion (final/error/aborted event) with timeout
         timeout = self.config.openclaw_timeout
         self._log_ws(f"Waiting for chat response (timeout={timeout}s)...", "DEBUG")
 
         if self._response_event.wait(timeout=timeout):
             response = self._full_response
-            # Гарантируем строку
+            # Ensure string type
             if isinstance(response, list):
                 response = "".join(str(r) for r in response)
             self._log_ws(f"Chat response received: {len(response)} chars", "INFO")
-            return response if response else "Извини, я не получила ответ."
+            return response if response else t("ws_errors.no_response")
         else:
             self._log_ws(f"Chat response timeout after {timeout}s", "WARN")
-            # Пытаемся отменить
+            # Try to cancel
             self.cancel()
-            return "Извини, ответ занял слишком много времени."
+            return t("ws_errors.timeout")
 
     def send_message(
         self,
@@ -1490,21 +1479,21 @@ class OpenClawWebSocket:
         context: Optional[str] = None,
         callback_mode: str = "streaming",
     ) -> bool:
-        """Отправляет сообщение через WebSocket используя chat.send (протокол v3).
+        """Send a message via WebSocket using chat.send (protocol v3).
 
         Args:
-            message: Сообщение для отправки
-            context: Опциональный контекст (добавляется к сообщению)
+            message: Message to send
+            context: Optional context (appended to the message)
 
         Returns:
-            True если запрос отправлен успешно
+            True if the request was sent successfully
         """
         if not self._is_authenticated:
             self._log_ws("Not authenticated, trying to connect...", "WARN")
             if not self.connect():
                 return False
 
-        # Сбрасываем состояние стриминга перед новым запросом
+        # Reset streaming state before a new request
         self._cancel_deferred_final()  # new request overrides any pending final
         self._cancel_initiated = False  # new request clears stale cancel flag
         self._last_tool_error = ""     # clear stale tool errors
@@ -1524,13 +1513,13 @@ class OpenClawWebSocket:
         self._response_event.clear()
         self._current_run_id = None
 
-        # Формируем полное сообщение с контекстом
+        # Build the full message with context
         full_message = message
         if context:
             full_message = f"{context}\n{message}"
 
         try:
-            # chat.send request по протоколу v3
+            # chat.send request per protocol v3
             req_id = str(uuid4())
             idempotency_key = str(uuid4())
 
@@ -1548,7 +1537,7 @@ class OpenClawWebSocket:
                 "params": chat_params
             }
 
-            # Регистрируем pending request для chat.send response
+            # Register pending request for chat.send response
             with self._pending_lock:
                 self._pending_requests[req_id] = {
                     "event": threading.Event(),
@@ -1572,15 +1561,15 @@ class OpenClawWebSocket:
             return False
 
     def is_processing(self) -> bool:
-        """Проверяет, выполняется ли сейчас обработка запроса."""
+        """Check if a request is currently being processed."""
         return self._is_processing
 
     def is_streaming(self) -> bool:
-        """Возвращает True, если сейчас идёт streaming ответ."""
+        """Return True if a streaming response is currently in progress."""
         return self._is_streaming
 
     def cancel(self) -> bool:
-        """Прерывает текущую обработку через chat.abort (протокол v3)."""
+        """Cancel current processing via chat.abort (protocol v3)."""
         self._cancel_deferred_final()  # cancel overrides pending final
         self._cancel_initiated = True  # suppress on_complete from abort response
         self._log_ws("Cancel requested (chat.abort)", "WARN")
@@ -1590,11 +1579,11 @@ class OpenClawWebSocket:
                 abort_params = {
                     "sessionKey": self._session_key,
                 }
-                # Добавляем runId если известен
+                # Add runId if known
                 if self._current_run_id:
                     abort_params["runId"] = self._current_run_id
 
-                # Отправляем abort асинхронно (не ждём ответ)
+                # Send abort asynchronously (do not wait for response)
                 req_id = str(uuid4())
                 frame = {
                     "type": "req",
@@ -1603,7 +1592,7 @@ class OpenClawWebSocket:
                     "params": abort_params
                 }
 
-                # Регистрируем pending (но не блокируем)
+                # Register pending (but do not block)
                 with self._pending_lock:
                     self._pending_requests[req_id] = {
                         "event": threading.Event(),
@@ -1617,7 +1606,7 @@ class OpenClawWebSocket:
             except Exception as e:
                 self._log_ws(f"chat.abort error: {e}", "ERROR")
 
-        # В любом случае сбрасываем состояние
+        # Reset state regardless
         self._is_streaming = False
         self._is_processing = False
         self._current_run_id = None
@@ -1636,7 +1625,7 @@ class OpenClawWebSocket:
         return True
 
     def close(self):
-        """Закрывает WebSocket соединение."""
+        """Close the WebSocket connection."""
         self._cancel_deferred_final()
         self._log_ws("Closing connection...", "INFO")
         self._stop_event.set()

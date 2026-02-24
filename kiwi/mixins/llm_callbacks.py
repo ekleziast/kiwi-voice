@@ -4,6 +4,7 @@ import time
 
 from kiwi.state_machine import DialogueState
 from kiwi.utils import kiwi_log
+from kiwi.i18n import t
 
 
 class LLMCallbacksMixin:
@@ -29,7 +30,7 @@ class LLMCallbacksMixin:
                 pass
 
             # Stop the status announcer on first real text — response is streaming,
-            # no need for "Думаю над ответом..." status messages anymore.
+            # no need for "Thinking about the answer..." status messages anymore.
             # Use stop_nowait() to avoid blocking LLM token delivery for 2s
             # while the announcer thread finishes its REST TTS call.
             if first_token and self._task_status_announcer:
@@ -91,7 +92,7 @@ class LLMCallbacksMixin:
 
         kiwi_log("LLM", "Agent continues — restarting status announcer for inter-wave updates", level="INFO")
         self._create_status_announcer(
-            "продолжаю выполнение",
+            t("responses.continuing_execution"),
             intervals=[5, 15, 30, 60, 120],
         )
 
@@ -120,7 +121,7 @@ class LLMCallbacksMixin:
                 kiwi_log("LLM", "Generation complete: 0 chars (EMPTY)", level="WARNING")
                 # Safety net: don't leave the user in silence
                 if not self._streaming_response_playback_started:
-                    full_text = "Не удалось получить ответ. Повтори, пожалуйста."
+                    full_text = t("responses.error_no_response")
         else:
             kiwi_log("LLM", f"Generation complete: {len(full_text)} chars", level="INFO")
 

@@ -1,12 +1,12 @@
 """
-Unified VAD Pipeline - Единый модуль Voice Activity Detection
+Unified VAD Pipeline - Single Voice Activity Detection module
 
-Объединяет:
-- Silero VAD (нейросеть)
-- Energy-based VAD (громкость)
-- Whisper VAD (no_speech_prob из транскрипции)
+Combines:
+- Silero VAD (neural network)
+- Energy-based VAD (volume)
+- Whisper VAD (no_speech_prob from transcription)
 
-Предоставляет единый интерфейс с confidence score.
+Provides a unified interface with confidence score.
 """
 
 import numpy as np
@@ -20,38 +20,38 @@ from kiwi.utils import kiwi_log
 
 @dataclass
 class VADResult:
-    """Результат VAD анализа."""
+    """VAD analysis result."""
     is_speech: bool
     confidence: float  # 0.0 - 1.0
     source: str        # 'silero', 'energy', 'whisper', 'combined'
     volume: float      # RMS volume
-    raw_scores: dict   # Сырые оценки от всех источников
+    raw_scores: dict   # Raw scores from all sources
 
 
 class UnifiedVAD:
     """
-    Единый VAD пайплайн.
-    
-    Использует несколько источников и комбинирует их
-    для более точного определения речи.
+    Unified VAD pipeline.
+
+    Uses multiple sources and combines them
+    for more accurate speech detection.
     """
     
     def __init__(
         self,
         sample_rate: int = 16000,
-        # Silero VAD настройки
+        # Silero VAD settings
         silero_threshold: float = 0.5,
         silero_min_speech_duration_ms: int = 250,
         silero_min_silence_duration_ms: int = 100,
-        # Energy VAD настройки
+        # Energy VAD settings
         energy_threshold_multiplier: float = 1.5,
         energy_min_threshold: float = 0.008,
         energy_max_threshold: float = 0.1,
-        # Комбинирование
+        # Combining
         use_silero: bool = True,
         use_energy: bool = True,
         use_whisper: bool = True,
-        # Сглаживание
+        # Smoothing
         smoothing_window: int = 5,
     ):
         self.sample_rate = sample_rate
@@ -71,26 +71,26 @@ class UnifiedVAD:
         self.use_energy = use_energy
         self.use_whisper = use_whisper
         
-        # Сглаживание
+        # Smoothing
         self.smoothing_window = smoothing_window
         self._confidence_history = deque(maxlen=smoothing_window)
-        
-        # Silero модель (ленивая загрузка)
+
+        # Silero model (lazy loading)
         self._silero_model = None
         self._silero_available = False
         
-        # Адаптивный порог шума
+        # Adaptive noise threshold
         self._noise_floor = 0.0
         self._adaptive_threshold = energy_min_threshold
-        self._noise_history = deque(maxlen=100)  # ~3 секунды при 30ms чанках
-        
-        # Статистика
+        self._noise_history = deque(maxlen=100)  # ~3 seconds at 30ms chunks
+
+        # Statistics
         self._total_calls = 0
         self._speech_detected_count = 0
         self._last_call_time = 0.0
         
     def _load_silero(self) -> bool:
-        """Ленивая загрузка Silero VAD."""
+        """Lazy load Silero VAD."""
         if self._silero_model is not None:
             return self._silero_available
         
@@ -111,7 +111,7 @@ class UnifiedVAD:
             return False
     
     def calibrate_noise_floor(self, audio_chunks: list):
-        """Калибрует порог шума по предоставленным чанкам."""
+        """Calibrate noise threshold from provided chunks."""
         if not audio_chunks:
             return
         
@@ -125,27 +125,27 @@ class UnifiedVAD:
               f"threshold: {self._adaptive_threshold:.6f}")
     
     def _calculate_rms(self, audio: np.ndarray) -> float:
-        """Вычисляет RMS громкость."""
+        """Calculate RMS volume."""
         if len(audio) == 0:
             return 0.0
         return np.sqrt(np.mean(audio ** 2))
     
     def _silero_check(self, audio: np.ndarray) -> Tuple[bool, float]:
-        """Проверка через Silero VAD."""
+        """Check via Silero VAD."""
         if not self.use_silero or not self._load_silero():
             return False, 0.0
         
         try:
             import torch
             
-            # Silero ожидает tensor
+            # Silero expects tensor
             audio_tensor = torch.from_numpy(audio).float()
             
-            # Минимальная длина для Silero - 512 семплов
+            # Minimum length for Silero - 512 samples
             if len(audio_tensor) < 512:
                 return False, 0.0
             
-            # Получаем confidence
+            # Get confidence
             with torch.no_grad():
                 confidence = self._silero_model(audio_tensor, self.sample_rate).item()
             
@@ -157,31 +157,31 @@ class UnifiedVAD:
             return False, 0.0
     
     def _energy_check(self, audio: np.ndarray) -> Tuple[bool, float]:
-        """Проверка через energy-based VAD."""
+        """Check via energy-based VAD."""
         if not self.use_energy:
             return False, 0.0
         
         volume = self._calculate_rms(audio)
         
-        # Обновляем адаптивный порог
+        # Update adaptive threshold
         self._noise_history.append(volume)
         if len(self._noise_history) >= 50:
-            # Пересчитываем порог каждые 50 чанков
+            # Recalculate threshold every 50 chunks
             self._noise_floor = np.percentile(self._noise_history, 10)
             self._adaptive_threshold = max(
                 self._noise_floor * self.energy_threshold_multiplier,
                 self.energy_min_threshold
             )
         
-        # Проверяем порог
+        # Check threshold
         is_speech = volume > self._adaptive_threshold
         
-        # Нормализуем confidence
+        # Normalize confidence
         if is_speech:
-            # Чем громче, тем выше confidence (до 1.0)
+            # Louder = higher confidence (up to 1.0)
             confidence = min(volume / (self._adaptive_threshold * 2), 1.0)
         else:
-            # Чем тише, тем увереннее что это не речь
+            # Quieter = more confident it is not speech
             confidence = max(0.0, 1.0 - (volume / self._adaptive_threshold))
         
         return is_speech, confidence
@@ -201,12 +201,12 @@ class UnifiedVAD:
         if not self.use_whisper:
             return True, 1.0
         
-        # no_speech_prob > 0.6 - скорее всего нет речи
-        # avg_logprob < -1.0 - галлюцинация
+        # no_speech_prob > 0.6 - most likely no speech
+        # avg_logprob < -1.0 - hallucination
         
         speech_confidence = 1.0 - no_speech_prob
         
-        # Учитываем logprob
+        # Account for logprob
         if avg_logprob < -1.0:
             speech_confidence *= 0.5
         elif avg_logprob > -0.5:
@@ -221,14 +221,14 @@ class UnifiedVAD:
         whisper_context: Optional[dict] = None
     ) -> VADResult:
         """
-        Единый метод проверки речи.
-        
+        Unified speech detection method.
+
         Args:
-            audio: numpy array с аудио
-            whisper_context: опционально результаты Whisper для улучшения
-        
+            audio: numpy array with audio
+            whisper_context: optional Whisper results for improvement
+
         Returns:
-            VADResult с объединенным результатом
+            VADResult with combined result
         """
         self._total_calls += 1
         self._last_call_time = time.time()
@@ -252,7 +252,7 @@ class UnifiedVAD:
             'threshold': self._adaptive_threshold
         }
         
-        # Whisper (если предоставлен)
+        # Whisper (if provided)
         whisper_speech, whisper_conf = True, 1.0
         if whisper_context:
             whisper_speech, whisper_conf = self.process_whisper_result(
@@ -265,20 +265,20 @@ class UnifiedVAD:
                 'confidence': whisper_conf
             }
         
-        # Комбинирование результатов
-        # Веса для разных источников
+        # Combining results
+        # Weights for different sources
         weights = {
             'silero': 0.4 if self.use_silero else 0.0,
             'energy': 0.3 if self.use_energy else 0.0,
             'whisper': 0.3 if self.use_whisper and whisper_context else 0.0
         }
         
-        # Нормализуем веса
+        # Normalize weights
         total_weight = sum(weights.values())
         if total_weight > 0:
             weights = {k: v / total_weight for k, v in weights.items()}
         
-        # Вычисляем взвешенную confidence
+        # Calculate weighted confidence
         combined_confidence = 0.0
         if weights.get('silero', 0) > 0:
             combined_confidence += weights['silero'] * silero_conf
@@ -287,7 +287,7 @@ class UnifiedVAD:
         if weights.get('whisper', 0) > 0:
             combined_confidence += weights['whisper'] * whisper_conf
         
-        # Голосование
+        # Voting
         votes = []
         if weights.get('silero', 0) > 0:
             votes.append(silero_speech)
@@ -296,20 +296,20 @@ class UnifiedVAD:
         if weights.get('whisper', 0) > 0:
             votes.append(whisper_speech)
         
-        # Простое большинство
+        # Simple majority
         is_speech = sum(votes) >= len(votes) / 2 if votes else True
         
-        # Сглаживание
+        # Smoothing
         self._confidence_history.append(combined_confidence)
         smoothed_confidence = np.mean(self._confidence_history)
         
-        # Финальное решение с учетом сглаживания
+        # Final decision with smoothing
         final_is_speech = smoothed_confidence > 0.5
         
         if final_is_speech:
             self._speech_detected_count += 1
         
-        # Определяем источник
+        # Determine source
         if len(votes) > 1:
             source = 'combined'
         elif votes and silero_speech == votes[0]:
@@ -334,32 +334,32 @@ class UnifiedVAD:
         tts_volume: float = 0.0
     ) -> bool:
         """
-        Специальный метод для определения barge-in.
-        
+        Specialized method for barge-in detection.
+
         Args:
-            audio: текущий аудио чанк
-            kiwi_is_speaking: говорит ли сейчас Kiwi
-            tts_volume: громкость текущего TTS (для адаптации порога)
-        
+            audio: current audio chunk
+            kiwi_is_speaking: whether Kiwi is currently speaking
+            tts_volume: current TTS volume (for threshold adaptation)
+
         Returns:
-            True если обнаружен barge-in
+            True if barge-in detected
         """
         if not kiwi_is_speaking:
             return False
         
         volume = self._calculate_rms(audio)
         
-        # Адаптивный порог: TTS громче -> порог выше
+        # Adaptive threshold: louder TTS -> higher threshold
         barge_in_threshold = max(
             self._adaptive_threshold * 2.0,
             tts_volume * 0.5,
-            0.02  # абсолютный минимум
+            0.02  # absolute minimum
         )
         
-        # Проверяем через VAD
+        # Check via VAD
         result = self.is_speech(audio)
         
-        # Barge-in: громкость выше порога И VAD уверен что это речь
+        # Barge-in: volume above threshold AND VAD confident it is speech
         if volume > barge_in_threshold and result.confidence > 0.7:
             kiwi_log("VAD", f"Barge-in detected! "
                   f"vol={volume:.4f} > thr={barge_in_threshold:.4f}, "
@@ -369,7 +369,7 @@ class UnifiedVAD:
         return False
     
     def get_stats(self) -> dict:
-        """Возвращает статистику VAD."""
+        """Return VAD statistics."""
         uptime = time.time() - self._last_call_time if self._last_call_time > 0 else 0
         return {
             'total_calls': self._total_calls,
@@ -381,13 +381,13 @@ class UnifiedVAD:
         }
     
     def reset(self):
-        """Сбрасывает состояние VAD."""
+        """Reset VAD state."""
         self._confidence_history.clear()
         self._noise_history.clear()
         self._total_calls = 0
         self._speech_detected_count = 0
         
-        # Сбрасываем hidden state Silero VAD
+        # Reset Silero VAD hidden state
         if self._silero_model is not None and hasattr(self._silero_model, 'reset_states'):
             try:
                 self._silero_model.reset_states()

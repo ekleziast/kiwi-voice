@@ -4,6 +4,7 @@
 import re
 
 from kiwi.utils import kiwi_log
+from kiwi.i18n import t
 
 
 def remove_duplicate_prefixes(text: str) -> str:
@@ -39,8 +40,11 @@ def normalize_tts_text(text: str) -> str:
     text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'\1', text)
     text = re.sub(r'https?://\S+|www\.\S+', ' ', text)
     text = re.sub(r'[<>{}\[\]|\\^~]+', ' ', text)
-    text = re.sub(r'\bи\s*т\.?\s*д\.?\b', 'и так далее', text, flags=re.IGNORECASE)
-    text = re.sub(r'\bи\s*т\.?\s*п\.?\b', 'и тому подобное', text, flags=re.IGNORECASE)
+    abbreviations = t("text_processing.abbreviations") or {"и т.д.": "и так далее", "и т.п.": "и тому подобное"}
+    if isinstance(abbreviations, dict):
+        for abbr, expansion in abbreviations.items():
+            escaped = re.escape(abbr).replace(r'\.', r'\.?').replace(r'\ ', r'\s*')
+            text = re.sub(r'\b' + escaped + r'\b', expansion, text, flags=re.IGNORECASE)
 
     # Paragraph break => longer pause, single newline => short pause
     text = re.sub(r'\n\s*\n+', f' {paragraph_marker} ', text)
@@ -122,7 +126,7 @@ def quick_completeness_check(text: str) -> bool:
         return True
 
     # Long phrase without incomplete patterns — likely complete
-    incomplete_endings = {
+    _incomplete_endings_default = {
         'и', 'а', 'но', 'или', 'да', 'либо', 'тоже', 'также',
         'что', 'чтобы', 'когда', 'если', 'хотя', 'потому', 'так',
         'который', 'которая', 'которое', 'которые',
@@ -131,10 +135,12 @@ def quick_completeness_check(text: str) -> bool:
         'в', 'на', 'с', 'под', 'над', 'за', 'перед', 'при',
         'к', 'по', 'у', 'о', 'об', 'до', 'от', 'для', 'без',
     }
-    incomplete_patterns = [
+    _incomplete_patterns_default = [
         'я хочу', 'я буду', 'я собираюсь', 'мне нужно', 'надо бы',
         'давай', 'скажи', 'расскажи', 'покажи', 'объясни', 'помоги',
     ]
+    incomplete_endings = set(t("text_processing.incomplete_endings") or _incomplete_endings_default)
+    incomplete_patterns = t("text_processing.incomplete_patterns") or _incomplete_patterns_default
 
     # If >= 5 words and doesn't end with conjunction/preposition
     if len(words) >= 5:
@@ -147,10 +153,11 @@ def quick_completeness_check(text: str) -> bool:
             return True
 
     # Clearly complete phrases
-    complete_patterns = [
+    _complete_patterns_default = [
         'что-нибудь', 'что-то', 'всё', 'ничего', 'пожалуйста',
         'анекдот', 'историю', 'сказку', 'шутку', 'время', 'дату', 'погоду',
     ]
+    complete_patterns = t("text_processing.complete_patterns") or _complete_patterns_default
     for pattern in complete_patterns:
         if pattern in stripped:
             return True
@@ -163,22 +170,32 @@ def detect_emotion(command: str, response: str) -> str:
     command_lower = command.lower()
     response_lower = response.lower()
 
-    if any(w in command_lower for w in ["срочно", "быстро", "важно"]):
+    urgent_kw = t("text_processing.emotion_keywords.urgent") or ["срочно", "быстро", "важно"]
+    sad_kw = t("text_processing.emotion_keywords.sad") or ["грустно", "плохо", "ужасно", "грустный"]
+    happy_kw = t("text_processing.emotion_keywords.happy") or ["круто", "отлично", "супер", "ура", "радостно"]
+    quiet_kw = t("text_processing.emotion_keywords.quiet") or ["тихо", "секрет", "шёпотом"]
+    funny_kw = t("text_processing.emotion_keywords.funny") or ["пошути", "анекдот", "смешно"]
+    curious_kw = t("text_processing.emotion_keywords.curious") or ["расскажи", "объясни", "что такое"]
+
+    apologetic_kw = t("text_processing.response_keywords.apologetic") or ["извини", "к сожалению", "не могу"]
+    enthusiastic_kw = t("text_processing.response_keywords.enthusiastic") or ["!", "отлично", "здорово", "супер"]
+
+    if any(w in command_lower for w in urgent_kw):
         return "confident"
-    if any(w in command_lower for w in ["грустно", "плохо", "ужасно", "грустный"]):
+    if any(w in command_lower for w in sad_kw):
         return "sad"
-    if any(w in command_lower for w in ["круто", "отлично", "супер", "ура", "радостно"]):
+    if any(w in command_lower for w in happy_kw):
         return "excited"
-    if any(w in command_lower for w in ["тихо", "секрет", "шёпотом"]):
+    if any(w in command_lower for w in quiet_kw):
         return "whisper"
-    if any(w in command_lower for w in ["пошути", "анекдот", "смешно"]):
+    if any(w in command_lower for w in funny_kw):
         return "playful"
-    if any(w in command_lower for w in ["расскажи", "объясни", "что такое"]):
+    if any(w in command_lower for w in curious_kw):
         return "neutral"
 
-    if any(w in response_lower for w in ["извини", "к сожалению", "не могу"]):
+    if any(w in response_lower for w in apologetic_kw):
         return "calm"
-    if any(w in response_lower for w in ["!", "отлично", "здорово", "супер"]):
+    if any(w in response_lower for w in enthusiastic_kw):
         return "cheerful"
 
     if "?" in command:

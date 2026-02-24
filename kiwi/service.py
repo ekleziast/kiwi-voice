@@ -47,7 +47,7 @@ from kiwi import PROJECT_ROOT, LOGS_DIR
 from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, '.env'))
 
-# Подавляем warning от torchcodec
+# Suppress torchcodec warnings
 import warnings
 warnings.filterwarnings("ignore", message=".*torchcodec.*")
 warnings.filterwarnings("ignore", module="pyannote")
@@ -60,7 +60,7 @@ except ImportError:
     UTILS_AVAILABLE = False
     print("[WARN] utils.py not found, using basic logging")
 
-# Добавляем ffmpeg в PATH для pydub (если указан через KIWI_FFMPEG_PATH)
+# Add ffmpeg to PATH for pydub (if specified via KIWI_FFMPEG_PATH)
 ffmpeg_path = os.getenv("KIWI_FFMPEG_PATH", "")
 if ffmpeg_path and os.path.exists(ffmpeg_path) and ffmpeg_path not in os.environ.get('PATH', ''):
     os.environ['PATH'] = ffmpeg_path + os.pathsep + os.environ.get('PATH', '')
@@ -124,6 +124,7 @@ from kiwi.tts.streaming import StreamingTTSManager
 from kiwi.openclaw_ws import OpenClawWebSocket
 from kiwi.openclaw_cli import OpenClawCLI
 from kiwi.task_announcer import TaskStatusAnnouncer
+from kiwi.i18n import setup as i18n_setup, t
 
 # Mixins
 from kiwi.mixins import (
@@ -143,12 +144,12 @@ class KiwiServiceOpenClaw(
     LLMCallbacksMixin,
     DialoguePipelineMixin,
 ):
-    """Главный сервис голосового ассистента Киви с OpenClaw интеграцией."""
+    """Main Kiwi voice assistant service with OpenClaw integration."""
 
     def __init__(self, config: Optional[KiwiConfig] = None):
         self.config = config or KiwiConfig()
 
-        # Флаг: был ли уже отправлен системный промт
+        # Flag: whether the system prompt has already been sent
         self._system_prompt_sent = False
 
         # === STATE MACHINE ===
@@ -156,13 +157,13 @@ class KiwiServiceOpenClaw(
         self._state_lock = threading.Lock()
         self._last_state_change = 0.0
 
-        # Таймауты для каждого состояния
+        # Timeouts for each state
         self._state_timeouts = {
-            DialogueState.IDLE: None,           # Бесконечный
-            DialogueState.LISTENING: 5.0,      # 5 сек на команду
+            DialogueState.IDLE: None,           # Infinite
+            DialogueState.LISTENING: 5.0,      # 5s for command
             DialogueState.PROCESSING: 25.0,     # LLM completeness/intent + buffer
             DialogueState.THINKING: 60.0,       # OpenClaw chat + buffer
-            DialogueState.SPEAKING: None,       # До конца TTS
+            DialogueState.SPEAKING: None,       # Until TTS finishes
         }
         self._state_until = 0.0
 
@@ -233,13 +234,13 @@ class KiwiServiceOpenClaw(
         with open(os.path.join(LOGS_DIR, 'kiwi_startup.log'), 'a', encoding='utf-8') as f:
             f.write('[START] Beep generated\n')
 
-        # Инициализация OpenClaw: WebSocket (если enabled) или CLI
+        # Initialize OpenClaw: WebSocket (if enabled) or CLI
         self.openclaw = self._init_openclaw()
 
         with open(os.path.join(LOGS_DIR, 'kiwi_startup.log'), 'a', encoding='utf-8') as f:
             f.write('[START] OpenClaw initialized\n')
 
-        # Инициализация TTS
+        # Initialize TTS
         self.tts_provider = self.config.tts_provider
         self.tts_qwen_backend = self.config.tts_qwen_backend
         self.use_local_tts = self.config.use_local_tts
@@ -303,7 +304,7 @@ class KiwiServiceOpenClaw(
             self.use_local_tts = False
             kiwi_log("TTS", f"Initialized Qwen3-TTS {self.config.tts_model_size} via RunPod", level="INFO")
 
-        # Инициализация Listener
+        # Initialize Listener
         listener_config = ListenerConfig(
             model_name=self.config.stt_model,
             device=self.config.stt_device,
@@ -330,11 +331,11 @@ class KiwiServiceOpenClaw(
             except Exception as e:
                 kiwi_log("KIWI", f"Voice Security init failed: {e}", level="WARNING")
 
-        # Состояние сервиса
+        # Service state
         self.is_running = False
 
     def _init_openclaw(self):
-        """Инициализирует OpenClaw клиент: WebSocket или CLI с fallback."""
+        """Initialize OpenClaw client: WebSocket or CLI with fallback."""
         if self.config.ws_enabled:
             try:
                 ws_client = OpenClawWebSocket(
@@ -373,7 +374,7 @@ class KiwiServiceOpenClaw(
     # === STATE MACHINE METHODS ===
 
     def _set_state(self, new_state: str):
-        """Атомарная смена состояния с логированием."""
+        """Atomic state transition with logging."""
         with self._state_lock:
             old_state = self._dialogue_state
             self._dialogue_state = new_state
@@ -397,26 +398,26 @@ class KiwiServiceOpenClaw(
             self.listener.drain_audio_queue()
 
     def _get_state(self) -> str:
-        """Получить текущее состояние."""
+        """Get current state."""
         with self._state_lock:
             return self._dialogue_state
 
     def _check_state_timeout(self) -> bool:
-        """Проверить, не истёк ли таймаут текущего состояния."""
+        """Check whether the current state timeout has expired."""
         with self._state_lock:
             if time.time() > self._state_until:
                 return True
             return False
 
     def _is_in_state(self, *states: str) -> bool:
-        """Проверить, находится ли система в одном из указанных состояний."""
+        """Check whether the system is in one of the specified states."""
         with self._state_lock:
             return self._dialogue_state in states
 
     # === IDLE / BARGE-IN ===
 
     def _start_idle_timer(self):
-        """Запускает таймер для idle звука через 1.5 секунды."""
+        """Start timer for idle sound after 1.5 seconds."""
         if self._idle_timer:
             self._idle_timer.cancel()
             self._idle_timer = None
@@ -439,14 +440,14 @@ class KiwiServiceOpenClaw(
         self._idle_timer.start()
 
     def _cancel_idle_timer(self):
-        """Отменяет таймер idle звука."""
+        """Cancel the idle sound timer."""
         if self._idle_timer:
             self._idle_timer.cancel()
             self._idle_timer = None
             kiwi_log("IDLE", "Timer cancelled", level="INFO")
 
     def request_barge_in(self):
-        """Вызывается listener когда обнаружен голос пользователя во время TTS."""
+        """Called by the listener when user voice is detected during TTS playback."""
         if self._is_speaking or self._is_streaming or self._streaming_tts_manager is not None:
             kiwi_log("BARGE-IN", "Requested by listener", level="INFO")
         self._barge_in_requested = True
@@ -455,15 +456,18 @@ class KiwiServiceOpenClaw(
         self._cancel_idle_timer()
 
     def is_speaking(self) -> bool:
-        """Возвращает True если Kiwi сейчас говорит."""
+        """Return True if Kiwi is currently speaking."""
         return self._is_speaking or self._is_streaming or self._streaming_tts_manager is not None
 
     # === LIFECYCLE ===
 
     def start(self):
-        """Запускает сервис с приветственным звуком и сообщением."""
+        """Start the service with startup sound and greeting."""
         if self.is_running:
             return
+
+        # Initialize i18n before any t() calls
+        i18n_setup(self.config.language)
 
         with open(os.path.join(LOGS_DIR, 'kiwi_startup.log'), 'a', encoding='utf-8') as f:
             f.write('[START] KiwiServiceOpenClaw.start() called\n')
@@ -487,7 +491,7 @@ class KiwiServiceOpenClaw(
         def greeting():
             time.sleep(0.5)
             self.speak(
-                "Привет! Я Киви. Скажи 'Киви' и команду, когда будешь готов.",
+                t("responses.greeting"),
                 style="cheerful",
                 allow_barge_in=False,
             )
@@ -497,7 +501,7 @@ class KiwiServiceOpenClaw(
             f.write('[START] Service fully started!\n')
 
     def stop(self):
-        """Останавливает сервис."""
+        """Stop the service."""
         if EVENT_BUS_AVAILABLE:
             from kiwi.event_bus import EventType
             get_event_bus().publish(
@@ -540,7 +544,7 @@ class KiwiServiceOpenClaw(
 
 
 def main():
-    """Запуск сервиса с OpenClaw интеграцией."""
+    """Launch the service with OpenClaw integration."""
 
     if UTILS_AVAILABLE:
         setup_crash_protection()
@@ -558,9 +562,9 @@ def main():
 
         service.start()
         log_func("KIWI", "\n" + "="*50)
-        log_func("KIWI", "Сервис запущен!")
+        log_func("KIWI", t("responses.service_started"))
         log_func("KIWI", "="*50)
-        log_func("KIWI", "Скажи 'Киви, привет!' чтобы начать")
+        log_func("KIWI", t("responses.instruction"))
         log_func("KIWI", "Ctrl+C для остановки\n")
 
         # Watchdog loop - check if daemon threads are alive and state timeouts
@@ -608,7 +612,7 @@ def main():
 
                         if not finalized:
                             service.speak(
-                                "Ответ занял слишком много времени. Повтори, пожалуйста.",
+                                t("responses.error_timeout"),
                                 style="calm",
                             )
             except Exception as e:
@@ -639,7 +643,7 @@ def main():
                         log_func("WATCHDOG", f"Failed to restart processing thread: {e}", level="ERROR")
 
     except KeyboardInterrupt:
-        log_func("KIWI", "\n[BYE] Останавливаюсь...")
+        log_func("KIWI", f"\n[BYE] {t('responses.shutting_down')}")
         service.stop()
     except Exception as e:
         log_func("CRITICAL", f"Unhandled exception in main: {e}", level="ERROR")

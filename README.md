@@ -38,6 +38,7 @@ Think of it as Alexa/Siri, but self-hosted, privacy-first, and plugged into your
 | 🛑 **Barge-In** | Interrupt the assistant mid-sentence by speaking over it |
 | 🧠 **Auto-Learning** | Automatically remembers new voices after first interaction |
 | 🔌 **WebSocket** | Native OpenClaw Gateway v3 protocol with delta/final streaming |
+| 🌍 **Multi-Language** | Built-in i18n with YAML locale files — switch language with a single config field |
 
 ## Architecture
 
@@ -83,6 +84,9 @@ cp .env.example .env
 Edit `config.yaml` to match your setup:
 
 ```yaml
+# Language: controls UI strings, STT, TTS, wake word, and command patterns
+language: "ru"               # ru | en (add more in kiwi/locales/)
+
 # TTS provider: elevenlabs | piper | qwen3
 tts:
   provider: "piper"          # Free, local, no API key needed
@@ -155,7 +159,7 @@ BLOCKED (priority 99) — Completely ignored
 | *"Kiwi, who is speaking?"* | Identify the current speaker |
 | *"Kiwi, what voices do you know?"* | List all known voiceprints |
 
-> 💡 Commands shown in English for docs, but Kiwi currently recognizes **Russian** voice commands. See `config.yaml → security.owner_control_commands` for the full list.
+> 💡 Voice commands are language-dependent. Set `language` in `config.yaml` to match your locale. See `kiwi/locales/*.yaml` for the full command lists.
 
 ### Telegram Approval
 
@@ -174,6 +178,7 @@ Set `KIWI_TELEGRAM_BOT_TOKEN` and `KIWI_TELEGRAM_CHAT_ID` in `.env` to enable.
 | `KIWI_TELEGRAM_CHAT_ID` | Telegram chat ID for approval messages |
 | `KIWI_TTS_PROVIDER` | Override TTS provider |
 | `KIWI_FFMPEG_PATH` | Custom FFmpeg path |
+| `KIWI_LANGUAGE` | Override language/locale (`ru`, `en`, etc.) |
 | `KIWI_DEBUG` | Enable debug logging |
 | `LLM_MODEL` | Override LLM model |
 
@@ -195,6 +200,8 @@ kiwi-voice/
 │   ├── unified_vad.py       # Voice Activity Detection
 │   ├── hardware_aec.py      # Acoustic Echo Cancellation
 │   ├── task_announcer.py    # Long-running task status announcer
+│   ├── i18n.py              # Lightweight i18n module (YAML locale loader)
+│   ├── locales/             # Locale files (ru.yaml, en.yaml, ...)
 │   ├── mixins/              # Service mixin modules
 │   │   ├── audio_playback.py    # Audio output and playback control
 │   │   ├── dialogue_pipeline.py # LLM dialogue orchestration
@@ -231,12 +238,28 @@ pytest tests/
 # - GPU: auto-detect CUDA with CPU fallback
 ```
 
+## Multi-Language Support
+
+Kiwi uses YAML-based locale files in `kiwi/locales/`. All user-facing strings, voice commands, wake word variants, hallucination filters, and security patterns are loaded from locale files.
+
+**Switch language:**
+```yaml
+# config.yaml
+language: "en"   # or "ru", etc.
+```
+
+**Add a new language:**
+1. Copy `kiwi/locales/en.yaml` to `kiwi/locales/{lang}.yaml`
+2. Translate all strings
+3. Set `language: "{lang}"` in `config.yaml`
+
+Currently shipped: **Russian** (`ru`) and **English** (`en`).
+
 ## Roadmap
 
-- [ ] English voice command support
 - [ ] Web UI for configuration
 - [ ] Plugin system for custom wake words
-- [ ] Multi-language STT
+- [ ] More language packs (Spanish, German, French, Portuguese, Chinese, Japanese)
 - [ ] Home Assistant integration
 
 ## License
