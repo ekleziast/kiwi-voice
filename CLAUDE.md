@@ -69,6 +69,14 @@ kiwi-voice/
     openclaw_ws.py               # WebSocket client for OpenClaw Gateway v3
     openclaw_cli.py              # CLI client for OpenClaw
     task_announcer.py            # Long-task status announcer
+    api/                         # REST API server
+      __init__.py
+      server.py                  # aiohttp server (port 7789) + WebSocket events
+    web/                         # Web UI dashboard
+      index.html                 # Single-page app
+      static/
+        style.css                # Dark theme styles
+        app.js                   # Dashboard logic
     locales/                     # i18n locale files
       __init__.py
       ru.yaml                    # Russian (default)
@@ -101,6 +109,16 @@ kiwi-voice/
       qwen_local.py              # Local Qwen3-TTS (GPU/CPU)
       runpod.py                  # RunPod serverless TTS client
       streaming.py               # Streaming TTS manager
+  custom_components/             # Home Assistant integration
+    kiwi_voice/
+      __init__.py                # HA entry point
+      config_flow.py             # Config UI flow
+      coordinator.py             # API polling coordinator
+      sensor.py                  # State, language, speakers, uptime sensors
+      switch.py                  # Listening on/off switch
+      button.py                  # Stop, reset, TTS test buttons
+      tts.py                     # TTS platform
+      manifest.json
   scripts/                       # Standalone utilities
   runpod/                        # Standalone RunPod deployment
   tests/
@@ -252,13 +270,34 @@ Console codepage is set for Unicode output via `ctypes.windll.kernel32.SetConsol
 
 ## Roadmap
 
-Phases 1–6 are complete (stability, state machine, streaming TTS, WebSocket, package structure, i18n).
+All planned phases are complete:
 
-Current roadmap:
+- Phase 1: Stability & Observability — **done**
+- Phase 2: State machine — **done**
+- Phase 3: Streaming TTS — **done**
+- Phase 4: WebSocket OpenClaw integration — **done**
+- Phase 5: Package structure reorganization — **done**
+- Phase 6: i18n / multi-language support (15 languages) — **done**
+- Phase 7: UnifiedVAD + HardwareAEC + EventBus integration — **done**
+- Phase 8: REST API (`kiwi/api/`, aiohttp on port 7789) — **done**
+- Phase 9: Web UI dashboard (`kiwi/web/`, dark theme SPA) — **done**
+- Phase 10: Home Assistant integration (`custom_components/kiwi_voice/`) — **done**
 
-- **Integrate UnifiedVAD** — `unified_vad.py` is implemented (Silero+Energy+Whisper voting) but listener.py still uses inline Silero VAD. Wire it in to improve detection accuracy.
-- **Integrate HardwareAEC** — `hardware_aec.py` is implemented (Windows/Linux/macOS + software fallback) but never imported. Needs TTS reference audio capture to cancel echo.
-- **Event-driven architecture** — `event_bus.py` infrastructure exists but only logs STATE_CHANGED. Migrate wake word detection, dialogue pipeline, and TTS to event-driven flow instead of direct callbacks.
-- **REST API** — HTTP API for external integrations and the web UI.
-- **Web UI** — Configuration dashboard (language, TTS provider, wake word, speaker management).
-- **Home Assistant integration** — HA custom component for voice control.
+### REST API
+
+- Server: `kiwi/api/server.py`, runs in background thread on port 7789
+- Endpoints: `/api/status`, `/api/config`, `/api/speakers`, `/api/languages`, `/api/tts/test`, `/api/stop`, `/api/reset-context`
+- WebSocket: `/api/events` for real-time EventBus streaming
+- Config: `api.enabled`, `api.host`, `api.port` in config.yaml
+
+### Web UI
+
+- Files: `kiwi/web/index.html`, `kiwi/web/static/style.css`, `kiwi/web/static/app.js`
+- Served at `http://localhost:7789/`
+- Dark theme SPA with live status, language switcher, speaker management, TTS test, event log
+
+### Home Assistant
+
+- Custom component: `custom_components/kiwi_voice/`
+- Config flow with connection testing
+- Entities: state sensor, language sensor, speakers sensor, uptime sensor, listening switch, stop/reset/TTS buttons, TTS platform

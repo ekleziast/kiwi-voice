@@ -258,13 +258,31 @@ Currently shipped — **15 languages:**
 | `pl` Polish | `zh` Chinese | `ja` Japanese | `ko` Korean |
 | `hi` Hindi | `ar` Arabic | `id` Indonesian | |
 
-## Roadmap
+## REST API & Web UI
 
-- [ ] Integrate UnifiedVAD and HardwareAEC (code exists, needs wiring)
-- [ ] Event-driven architecture (migrate from callbacks to event bus)
-- [ ] REST API for external integrations
-- [ ] Web UI for configuration
-- [ ] Home Assistant integration
+Kiwi includes a built-in REST API and web dashboard:
+
+```bash
+# API runs automatically on port 7789 when the service starts
+# Open the dashboard:
+http://localhost:7789/
+```
+
+**API endpoints:** `/api/status`, `/api/config`, `/api/speakers`, `/api/languages`, `/api/tts/test`, `/api/stop`, `/api/reset-context`, plus WebSocket `/api/events` for real-time streaming.
+
+Configure in `config.yaml`:
+```yaml
+api:
+  enabled: true
+  host: "0.0.0.0"
+  port: 7789
+```
+
+## Home Assistant Integration
+
+Copy `custom_components/kiwi_voice/` to your HA `custom_components/` directory. Add the integration via the HA UI — it auto-discovers Kiwi Voice on your network.
+
+**Entities:** state sensor, language sensor, speakers count, uptime, listening switch, stop/reset/TTS buttons, TTS platform.
 
 ## License
 
