@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kiwi Voice Dashboard</title>
+    <title>Kiwi Voice</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="static/style.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F95D;</text></svg>">
 </head>
@@ -11,16 +14,19 @@
     <div class="dashboard">
         <!-- Header -->
         <header class="header">
-            <div class="header-left">
-                <h1 class="logo">&#x1F95D; Kiwi Voice</h1>
-                <span class="version" id="header-version">Dashboard</span>
-            </div>
-            <div class="header-right">
-                <div class="state-indicator" id="state-indicator">
-                    <span class="state-dot" id="state-dot"></span>
-                    <span class="state-label" id="state-label">Connecting...</span>
+            <div class="header-brand">
+                <div class="brand-mark">K</div>
+                <div class="brand-text">
+                    <h1 class="logo">Kiwi Voice</h1>
+                    <span class="version" id="header-version">Dashboard</span>
                 </div>
-                <div class="uptime" id="uptime">Uptime: --:--:--</div>
+            </div>
+            <div class="header-center" id="state-indicator">
+                <span class="state-dot" id="state-dot"></span>
+                <span class="state-label" id="state-label">Connecting...</span>
+            </div>
+            <div class="header-meta">
+                <span class="uptime" id="uptime">--:--:--</span>
             </div>
         </header>
 
@@ -30,13 +36,16 @@
         <!-- Main grid -->
         <div class="grid">
             <!-- Status Card -->
-            <div class="card status-card">
-                <h2 class="card-title">Status</h2>
+            <div class="card card-status">
+                <h2 class="card-title">
+                    <span class="card-title-dot" style="background: var(--accent)"></span>
+                    Live Status
+                </h2>
                 <div class="status-grid">
                     <div class="status-item">
                         <span class="status-label">State</span>
                         <span class="status-value" id="status-state">
-                            <span class="state-badge state-idle">IDLE</span>
+                            <span class="state-badge state-idle">Idle</span>
                         </span>
                     </div>
                     <div class="status-item">
@@ -66,11 +75,73 @@
                 </div>
             </div>
 
+            <!-- Controls + TTS Card -->
+            <div class="card card-controls">
+                <h2 class="card-title">
+                    <span class="card-title-dot" style="background: var(--amber)"></span>
+                    Controls
+                </h2>
+                <div class="controls-buttons">
+                    <button class="btn btn-danger" onclick="stopService()">
+                        <span class="btn-icon">&#x23F9;</span> Stop
+                    </button>
+                    <button class="btn btn-warning" onclick="resetContext()">
+                        <span class="btn-icon">&#x1F504;</span> Reset
+                    </button>
+                    <button class="btn btn-primary" onclick="restartService()">
+                        <span class="btn-icon">&#x21BB;</span> Restart
+                    </button>
+                    <button class="btn btn-danger" onclick="shutdownService()">
+                        <span class="btn-icon">&#x23FB;</span> Shutdown
+                    </button>
+                </div>
+                <div class="tts-section">
+                    <h3 class="section-label">TTS Test</h3>
+                    <div class="tts-controls">
+                        <input type="text" id="tts-test-input" class="text-input" placeholder="Type something to speak..." value="Hello, I am Kiwi!">
+                        <button class="btn btn-primary" id="tts-test-btn" onclick="testTTS()">Speak</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Config Card -->
+            <div class="card card-config">
+                <h2 class="card-title">
+                    <span class="card-title-dot" style="background: var(--cyan)"></span>
+                    Configuration
+                </h2>
+                <div class="status-grid" id="config-grid">
+                    <div class="status-item">
+                        <span class="status-label">Wake Word</span>
+                        <span class="status-value mono" id="config-wake-word">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">STT Model</span>
+                        <span class="status-value mono" id="config-stt-model">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">STT Device</span>
+                        <span class="status-value mono" id="config-stt-device">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">LLM Model</span>
+                        <span class="status-value mono" id="config-llm-model">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Sample Rate</span>
+                        <span class="status-value mono" id="config-sample-rate">--</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Language Card -->
-            <div class="card language-card">
-                <h2 class="card-title">Language</h2>
+            <div class="card card-language">
+                <h2 class="card-title">
+                    <span class="card-title-dot" style="background: var(--violet)"></span>
+                    Language
+                </h2>
                 <div class="language-current">
-                    <span class="status-label">Current Language</span>
+                    <span class="status-label">Current</span>
                     <span class="status-value" id="current-language">--</span>
                 </div>
                 <div class="language-controls">
@@ -80,75 +151,25 @@
                     <button class="btn btn-primary" id="language-apply-btn" onclick="applyLanguage()">Apply</button>
                 </div>
             </div>
-
-            <!-- TTS Card -->
-            <div class="card tts-card">
-                <h2 class="card-title">TTS Test</h2>
-                <div class="tts-controls">
-                    <input type="text" id="tts-test-input" class="text-input" placeholder="Enter text to speak..." value="Hello, I am Kiwi!">
-                    <button class="btn btn-primary" id="tts-test-btn" onclick="testTTS()">Speak</button>
-                </div>
-            </div>
-
-            <!-- Controls Card -->
-            <div class="card controls-card">
-                <h2 class="card-title">Controls</h2>
-                <div class="controls-buttons">
-                    <button class="btn btn-danger" onclick="stopService()">
-                        <span class="btn-icon">&#x23F9;</span> Stop Playback
-                    </button>
-                    <button class="btn btn-warning" onclick="resetContext()">
-                        <span class="btn-icon">&#x1F504;</span> Reset Context
-                    </button>
-                    <button class="btn btn-primary" onclick="restartService()">
-                        <span class="btn-icon">&#x21BB;</span> Restart
-                    </button>
-                    <button class="btn btn-danger" onclick="shutdownService()">
-                        <span class="btn-icon">&#x23FB;</span> Shutdown
-                    </button>
-                </div>
-            </div>
-            <!-- Config Card -->
-            <div class="card config-card">
-                <h2 class="card-title">Configuration</h2>
-                <div class="status-grid" id="config-grid">
-                    <div class="status-item">
-                        <span class="status-label">Wake Word</span>
-                        <span class="status-value" id="config-wake-word">--</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">STT Model</span>
-                        <span class="status-value" id="config-stt-model">--</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">STT Device</span>
-                        <span class="status-value" id="config-stt-device">--</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">LLM Model</span>
-                        <span class="status-value" id="config-llm-model">--</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">Sample Rate</span>
-                        <span class="status-value" id="config-sample-rate">--</span>
-                    </div>
-                </div>
-            </div>
         </div>
 
-
         <!-- Souls / Personality -->
-        <section class="card souls-card">
-            <h2 class="card-title">Personality</h2>
+        <section class="card card-souls">
+            <h2 class="card-title">
+                <span class="card-title-dot" style="background: var(--orange)"></span>
+                Personalities
+            </h2>
             <div class="souls-grid" id="souls-grid">
                 <p class="empty-state">Loading souls...</p>
             </div>
         </section>
 
-
-        <!-- Speakers Card (full width) -->
-        <div class="card speakers-card">
-            <h2 class="card-title">Speakers</h2>
+        <!-- Speakers -->
+        <div class="card card-speakers">
+            <h2 class="card-title">
+                <span class="card-title-dot" style="background: var(--emerald)"></span>
+                Speakers
+            </h2>
             <div class="table-container">
                 <table class="speakers-table" id="speakers-table">
                     <thead>
@@ -169,10 +190,13 @@
             </div>
         </div>
 
-        <!-- Event Log Card (full width) -->
-        <div class="card event-log-card">
+        <!-- Event Log -->
+        <div class="card card-events">
             <div class="card-title-row">
-                <h2 class="card-title">Event Log</h2>
+                <h2 class="card-title">
+                    <span class="card-title-dot" style="background: var(--text-3)"></span>
+                    Event Log
+                </h2>
                 <button class="btn btn-small btn-secondary" onclick="clearEventLog()">Clear</button>
             </div>
             <div class="event-log" id="event-log">
@@ -188,8 +212,8 @@
         <div class="connection-overlay" id="connection-overlay" style="display: none;">
             <div class="connection-message">
                 <div class="spinner"></div>
-                <p>Connecting to Kiwi Voice API...</p>
-                <p class="connection-sub">Make sure the service is running on <code>localhost:7789</code></p>
+                <p>Connecting to Kiwi Voice</p>
+                <p class="connection-sub">Waiting for service on <code>localhost:7789</code></p>
             </div>
         </div>
     </div>

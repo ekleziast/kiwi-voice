@@ -166,14 +166,17 @@ function updateSoulsGrid(data) {
 
         let html = '<div class="soul-header">';
         html += '<span class="soul-name">' + escapeHtml(soul.name) + '</span>';
-        if (soul.nsfw) html += '<span class="soul-badge nsfw-badge">18+</span>';
+        if (soul.nsfw) html += '<span class="soul-badge nsfw-badge">NSFW</span>';
         if (isActive) html += '<span class="soul-badge active-badge">Active</span>';
         html += '</div>';
         html += '<p class="soul-description">' + escapeHtml(soul.description || '') + '</p>';
         if (soul.model) html += '<p class="soul-model">Model: ' + escapeHtml(soul.model) + '</p>';
-        if (!isActive) html += '<button class="btn btn-small btn-primary" onclick="switchSoul(&#39;' + escapeAttr(soul.id) + '&#39;)">Activate</button>';
 
         card.innerHTML = html;
+        if (!isActive) {
+            card.style.cursor = 'pointer';
+            card.onclick = function() { switchSoul(soul.id); };
+        }
         grid.appendChild(card);
     }
 }
@@ -191,7 +194,7 @@ async function switchSoul(soulId) {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         showToast(`Switched to ${data.name}`, 'success');
-        addEventLogEntry('SOUL', `Switched to ${data.name}${data.nsfw ? ' (18+)' : ''}`, 'system');
+        addEventLogEntry('SOUL', `Switched to ${data.name}${data.nsfw ? ' (NSFW)' : ''}`, 'system');
         fetchSouls();
         fetchStatus();
     } catch (err) {
@@ -534,7 +537,7 @@ function updateStatus(status) {
     const soulEl = document.getElementById('status-soul');
     if (soulEl) {
         if (status.active_soul) {
-            soulEl.textContent = status.active_soul.name + (status.active_soul.nsfw ? ' (18+)' : '');
+            soulEl.textContent = status.active_soul.name + (status.active_soul.nsfw ? ' (NSFW)' : '');
         } else {
             soulEl.textContent = '--';
         }

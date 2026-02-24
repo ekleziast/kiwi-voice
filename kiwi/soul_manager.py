@@ -107,7 +107,7 @@ class SoulManager:
         prompt = content.strip()
 
         # Auto-detect NSFW from filename or content
-        nsfw = soul_id in ("nsfw", "18+", "adult")
+        nsfw = soul_id in ("nsfw", "18+", "adult", "siren")
 
         return SoulConfig(
             id=soul_id,

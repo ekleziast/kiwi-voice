@@ -495,16 +495,25 @@ class KiwiConfig:
                 kiwi_log("CONFIG", "Changing compute_type from float16 to int8 for CPU compatibility", level="INFO")
                 config.stt_compute_type = "int8"
 
-        # Populate voice_system_prompt from i18n if not set by YAML/env
+        # Populate voice_system_prompt from SOUL.md (project root), fallback to i18n
         if not config.voice_system_prompt:
-            try:
-                from kiwi.i18n import setup as _i18n_setup, t as _t
-                _i18n_setup(config.language)
-                prompt = _t("system.voice_prompt")
-                if prompt != "system.voice_prompt":  # key exists in locale
-                    config.voice_system_prompt = prompt
-            except Exception:
-                pass
+            from kiwi import PROJECT_ROOT
+            soul_md_path = os.path.join(PROJECT_ROOT, "SOUL.md")
+            if os.path.isfile(soul_md_path):
+                try:
+                    with open(soul_md_path, "r", encoding="utf-8") as f:
+                        config.voice_system_prompt = f.read().strip()
+                except Exception:
+                    pass
+            if not config.voice_system_prompt:
+                try:
+                    from kiwi.i18n import setup as _i18n_setup, t as _t
+                    _i18n_setup(config.language)
+                    prompt = _t("system.voice_prompt")
+                    if prompt != "system.voice_prompt":
+                        config.voice_system_prompt = prompt
+                except Exception:
+                    pass
 
         return config
 
