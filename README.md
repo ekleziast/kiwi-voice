@@ -222,15 +222,16 @@ Currently shipped — **15 languages:**
 
 Kiwi supports dynamic personality switching via markdown-based "souls" in `kiwi/souls/`. Each soul defines a system prompt overlay that shapes how Kiwi responds.
 
-**Built-in souls:** Mindful Companion (default), Storyteller, Comedian, Hype Person, NSFW (18+)
+**Built-in souls:** Mindful Companion (default), Storyteller, Comedian, Hype Person, Siren (NSFW)
 
-Switch via voice command, Web UI, or API:
+The base system prompt is loaded from `SOUL.md` in the project root. Soul personalities are layered on top of it.
+
+Switch via voice command, Web UI (click the card), or API:
 ```bash
-# API
 curl -X POST http://localhost:7789/api/soul -d '{"soul_id": "comedian"}'
 ```
 
-The NSFW soul routes to a separate OpenClaw agent with its own LLM model (e.g. `mistral-7b-instruct`), configured in `config.yaml`:
+The Siren (NSFW) soul routes to a separate OpenClaw agent with its own LLM model, configured in `config.yaml`:
 ```yaml
 souls:
   default: "mindful-companion"
@@ -239,15 +240,25 @@ souls:
     session: "kiwi-nsfw"
 ```
 
-## REST API & Web UI
+## REST API & Web Dashboard
 
-Kiwi includes a built-in REST API and web dashboard:
+Kiwi includes a built-in REST API and a real-time web dashboard.
 
 ```bash
-# API runs automatically on port 7789 when the service starts
-# Open the dashboard:
+# Starts automatically with the service
 http://localhost:7789/
 ```
+
+<!-- TODO: add screenshot — save as docs/dashboard.png -->
+<!-- ![Dashboard](docs/dashboard.png) -->
+
+**Dashboard features:**
+- **Live state orb** — animated indicator that changes color and pulse speed with assistant state (idle / listening / thinking / speaking)
+- **Real-time event log** — terminal-style feed of all system events via WebSocket
+- **Personality cards** — bank-card styled soul switcher with holographic accents; click to activate, NSFW souls highlighted in ruby
+- **Speaker management** — table with voiceprint priority badges, block/unblock/delete actions
+- **Controls** — stop playback, reset context, restart/shutdown, TTS test
+- **Language switcher** — change locale on the fly
 
 **API endpoints:** `/api/status`, `/api/config`, `/api/speakers`, `/api/languages`, `/api/souls`, `/api/soul`, `/api/tts/test`, `/api/stop`, `/api/reset-context`, `/api/restart`, `/api/shutdown`, plus WebSocket `/api/events` for real-time streaming.
 
