@@ -1,0 +1,482 @@
+# Chinese Simplified locale for Kiwi Voice Assistant
+
+# Voice system prompt
+system:
+  voice_prompt: |
+    你是Kiwi，一个语音助手。你连接到OpenClaw，可以执行任何任务：文件操作、代码、浏览器、终端、搜索、系统管理——所有功能都可以使用。
+
+    语音模式规则：
+    1. 回答要简洁但完整。完整比简短更重要。
+    2. 保持友好和有情感
+    3. 如果需要执行任务——直接做，不要说做不到。简要报告结果。
+    4. 不要拒绝执行。通过OpenClaw你可以做任何事。
+    5. 如果对细节不确定——请用户补充说明
+
+    背景：用户正在用语音说话，回复将通过TTS朗读。
+
+# User-facing spoken responses
+responses:
+  greeting: "你好！我是Kiwi。准备好了就说「Kiwi」加上你的指令。"
+  service_started: "服务已启动！"
+  instruction: "说「Kiwi，你好！」开始使用"
+  error_timeout: "响应时间太长了。请再说一次。"
+  error_no_response: "没有收到回复。请再说一次。"
+  error_send_failed: "抱歉，消息发送失败。"
+  error_retry_failed: "没有收到回复。请再试一次。"
+  error_stream_stalled: "响应中断了。请再说一次。"
+  shutting_down: "正在关闭..."
+  context_cleared: "上下文已清除。开始新对话。"
+  calibrating: "正在校准语音识别。"
+  approval_accepted: "已接受。正在执行{requester}的请求。"
+  approval_denied: "好的，{requester}的请求已拒绝。"
+  telegram_approved: "Telegram已确认。正在执行{requester}的请求。"
+  telegram_denied: "{requester}的请求已通过Telegram拒绝。"
+  heard: "听到了：{command}"
+  thinking: "正在思考..."
+  cancel_received: "收到取消指令！"
+  stopped: "已停止。"
+  nothing_to_stop: "没有需要停止的任务。"
+  unknown_speaker: "陌生人"
+  continuing_execution: "继续执行"
+  owner_registered: "好了。已记住主人的声音：{name}。"
+  owner_register_failed: "无法保存配置文件。请说一句更长的话再试。"
+  owner_already_registered: "主人已经注册了。只有主人可以更改声音配置。"
+  owner_reregistration_attempt: "来自{speaker}的主人重新注册尝试：'{command}'"
+  profiles_unavailable: "配置文件模块暂时不可用。"
+  cannot_identify: "目前无法识别说话人。"
+  voice_list_unavailable: "声音列表暂时不可用。"
+  only_owner_can_add: "只有主人可以添加新成员。"
+  say_name_prompt: "请在指令后说出名字：记住我叫..."
+  voice_remembered: "已记住声音：{name}。"
+  voice_save_failed: "无法保存声音。需要更清晰的语句。"
+  approval_prompt_voice_and_telegram: "请说：同意。或在Telegram中确认。"
+  approval_prompt_voice: "请说：同意或拒绝。"
+  approval_prompt_telegram: "请在Telegram中确认。"
+  approval_prompt_register: "注册主人声音：Kiwi，我是主人。"
+  approval_request: "{owner}，{speaker}请求：{command}。{hint}"
+
+# Status announcer fallback messages
+status:
+  thinking: "正在思考答案..."
+  processing: "正在处理请求，请稍等..."
+  working: "还在处理中，结果很快就好..."
+  continuing: "继续处理中，需要一些时间..."
+  almost_done: "快好了..."
+
+# Voice security messages
+security:
+  safe: "安全指令"
+  warning: "需要注意的指令"
+  dangerous: "危险指令！"
+  critical: "极度危险指令！"
+  unknown_level: "未知危险等级"
+  telegram_confirm: "确认执行？"
+  telegram_approved: "已通过！"
+  telegram_denied: "已拒绝"
+  approve_button: "同意"
+  deny_button: "拒绝"
+  telegram_request_title: "*Kiwi - 审批请求*"
+  telegram_speaker_label: "*说话人：*"
+  telegram_command_label: "*指令：*"
+  telegram_security_title: "*Kiwi — 安全*"
+  awaiting_approval: "等待Telegram审批中..."
+
+# Speaker identification responses
+speakers:
+  self_response: "那是我，Kiwi！"
+  owner_response: "那是你，{name}！（置信度{confidence}）"
+  blocked_response: "这是一个被屏蔽的声音"
+  known_response: "这是{name}（置信度{confidence}）"
+  unknown_response: "我不认识这个声音"
+  blocked_display: "已屏蔽"
+  calibration_phrase: "你好，我是Kiwi。这是一段用于校准的测试语句。"
+
+# Speaker manager access control messages
+speaker_access:
+  unknown_voice: "未知声音"
+  voice_blocked: "声音已被屏蔽"
+  voice_blacklisted: "声音在黑名单中"
+  self_echo: "这是Kiwi（回声）"
+  allowed: "已允许"
+
+# Wake word configuration
+wake_word:
+  keyword: "kiwi"
+  whisper_prompt: "Kiwi"
+  typos:
+    "kiwei": "kiwi"
+    "kivi": "kiwi"
+    "keewee": "kiwi"
+    "kiwe": "kiwi"
+    "kiwee": "kiwi"
+    "keewi": "kiwi"
+    "kwi": "kiwi"
+    "iwi": "kiwi"
+    "qiwi": "kiwi"
+    "qiwei": "kiwi"
+  fuzzy_blacklist:
+    - "key"
+    - "kid"
+    - "kit"
+    - "qi"
+    - "chi"
+    - "ji"
+    - "ki"
+
+# Whisper hallucination filtering
+hallucinations:
+  phrases:
+    - "谢谢观看"
+    - "请订阅"
+    - "字幕制作"
+    - "感谢收看"
+    - "关注我们"
+    - "点赞加关注"
+    - "别忘了订阅"
+    - "欢迎收看"
+    - "下期再见"
+    - "感谢支持"
+    - "字幕由"
+    - "编辑"
+    - "翻译"
+    - "请点赞"
+    - "别忘了点赞"
+    - "点击小铃铛"
+    - "留下评论"
+    - "srt subs"
+    - "amara.org"
+    - "未完待续"
+  phantom_phrases:
+    - "字幕编辑"
+    - "订阅我们的频道"
+    - "嗯嗯嗯"
+    - "字幕"
+    - "电话铃声"
+    - "响铃"
+    - "字幕制作人"
+  phantom_patterns:
+    - "^嗯+$"
+    - "^啊+$"
+    - "^哦+$"
+    - "^kiwi[.\\s]*kiwi[.\\s]*kiwi"
+    - "^(kiwi[.\\s]*){2,}$"
+    - "^(.)\\1{4,}$"
+
+# Text processing rules
+text_processing:
+  abbreviations:
+    "等等": "等等"
+    "比如": "比如说"
+  incomplete_endings:
+    - "和"
+    - "但是"
+    - "或者"
+    - "因为"
+    - "所以"
+    - "如果"
+    - "的"
+    - "了"
+    - "在"
+    - "把"
+    - "被"
+    - "让"
+    - "给"
+    - "从"
+    - "到"
+    - "对"
+    - "向"
+    - "跟"
+    - "而且"
+    - "不过"
+    - "然而"
+    - "虽然"
+    - "虽说"
+    - "不但"
+    - "不仅"
+    - "要是"
+    - "假如"
+    - "即使"
+    - "哪怕"
+    - "无论"
+    - "不管"
+    - "还是"
+    - "也"
+    - "还"
+    - "就"
+  incomplete_patterns:
+    - "我想"
+    - "我要"
+    - "我会"
+    - "我需要"
+    - "我打算"
+    - "咱们"
+    - "请告诉我"
+    - "给我看"
+    - "解释一下"
+    - "帮我"
+    - "请"
+  complete_patterns:
+    - "什么"
+    - "任何"
+    - "所有"
+    - "没什么"
+    - "拜托"
+    - "笑话"
+    - "故事"
+    - "传说"
+    - "时间"
+    - "日期"
+    - "天气"
+  emotion_keywords:
+    urgent:
+      - "紧急"
+      - "快"
+      - "重要"
+      - "马上"
+    sad:
+      - "难过"
+      - "不好"
+      - "糟糕"
+      - "可怕"
+    happy:
+      - "太棒了"
+      - "好极了"
+      - "太好了"
+      - "厉害"
+      - "真棒"
+    quiet:
+      - "悄悄"
+      - "秘密"
+      - "小声"
+    funny:
+      - "笑话"
+      - "搞笑"
+      - "逗我笑"
+    curious:
+      - "告诉我"
+      - "解释一下"
+      - "什么是"
+  response_keywords:
+    apologetic:
+      - "抱歉"
+      - "不好意思"
+      - "做不到"
+    enthusiastic:
+      - "！"
+      - "太棒了"
+      - "好极了"
+      - "超赞"
+
+# Dangerous command patterns (regexes)
+security_patterns:
+  critical:
+    - "删除(所有|全部|所有的|全部的)?(文件|文件夹|目录)"
+    - "rm\\s+(-rf|/r|/f|rf)"
+    - "format\\s+[a-zA-Z]:"
+    - "shutdown\\s+(-h|-s|/s|/h|now)"
+    - "关机|重启|重新启动"
+    - "关闭(电脑|计算机|系统)"
+    - "发送(密码|秘钥|令牌|密钥)"
+    - "显示(密码|秘钥|令牌)"
+    - "告诉.*(密码|密钥|PIN码)"
+  dangerous:
+    - "sudo\\s+"
+    - "chmod\\s+777|chmod\\s+-R"
+    - "systemctl\\s+(stop|disable|kill)"
+    - "net\\s+stop"
+    - "安装.*(未知|不受信任的)"
+    - "下载.*(可执行文件|病毒|木马)"
+  warning:
+    - "更改(设置|配置)"
+    - "配置(系统|服务器|nginx|apache)"
+    - "打开(端口)"
+    - "关闭(端口|防火墙)"
+    - "ping\\s+-t"
+    - "移动(文件|文件夹)"
+    - "复制"
+
+# Dangerous command examples
+dangerous_commands:
+  critical:
+    - "删除所有文件"
+    - "格式化C盘"
+    - "立即关机"
+    - "sudo rm -rf"
+    - "发送密码"
+    - "关闭电脑"
+  dangerous:
+    - "sudo "
+    - "chmod 777"
+    - "systemctl stop"
+  warning:
+    - "更改设置"
+    - "打开端口"
+    - "移动文件"
+
+# Owner voice control commands
+owner_commands:
+  block_last:
+    - "加入黑名单"
+    - "屏蔽"
+    - "封禁"
+  unblock_last:
+    - "解除屏蔽"
+    - "从黑名单移除"
+    - "解禁"
+  add_friend:
+    - "记住我叫"
+    - "这是我的朋友"
+    - "记住"
+  forget_speaker:
+    - "忘记这个声音"
+    - "删除配置"
+  identify:
+    - "谁在说话"
+    - "这是谁"
+  list_voices:
+    - "有哪些声音"
+    - "列出声音"
+
+# Owner control regex patterns
+owner_control_patterns:
+  block_last: "黑名单|屏蔽.*声音|封禁.*声音|加入.*黑名单"
+  unblock_last: "解除屏蔽|从.*黑名单.*移除|解禁.*声音"
+  add_friend: "记住.*叫|这是我的朋友|记住.*声音|添加.*朋友"
+  forget_speaker: "忘记.*声音|删除.*配置|移除.*朋友"
+  identify: "谁.*说话|谁.*是.*这个|识别.*声音"
+  list_voices: "哪些.*声音|列出.*声音|显示.*声音"
+
+# Name extraction patterns
+name_patterns:
+  patterns:
+    - "叫我\\s*(\\S+)"
+    - "我叫\\s*(\\S+)"
+    - "我是\\s*(\\S+)"
+    - "名字是\\s*(\\S+)"
+  filter_words:
+    - "你"
+    - "我"
+    - "他"
+    - "她"
+    - "谁"
+    - "什么"
+
+# Special command keywords
+commands:
+  calibrate:
+    - "校准"
+    - "重新校准"
+    - "更新配置"
+  reset_context:
+    - "重置上下文"
+    - "新对话"
+    - "忘记"
+    - "重置系统提示"
+  stop:
+    - "停止"
+    - "取消"
+    - "够了"
+    - "停"
+    - "退出"
+  register_owner:
+    - "记住我的声音"
+    - "注册我的声音"
+    - "我是主人"
+  approval_yes:
+    - "同意"
+    - "确认"
+    - "允许"
+    - "执行"
+    - "好的，执行"
+    - "继续吧"
+  approval_no:
+    - "拒绝"
+    - "否决"
+    - "不要执行"
+    - "不"
+    - "禁止"
+    - "取消审批"
+  safe_markers:
+    - "笑话"
+    - "故事"
+    - "传说"
+    - "聊天"
+    - "你好吗"
+    - "唱歌"
+    - "几点了"
+    - "时间"
+    - "日期"
+    - "星期几"
+    - "天气"
+    - "新闻"
+    - "告诉我"
+    - "解释"
+    - "谁是"
+    - "什么是"
+  task_markers:
+    - "做"
+    - "执行"
+    - "运行"
+    - "打开"
+    - "关闭"
+    - "删除"
+    - "创建"
+    - "设置"
+    - "下载"
+    - "安装"
+    - "发送"
+    - "写"
+    - "更改"
+    - "移动"
+    - "查找"
+    - "搜索"
+    - "检查"
+    - "前往"
+    - "命令"
+    - "终端"
+    - "命令行"
+
+# OpenClaw CLI error messages
+cli_errors:
+  empty_response: "抱歉，没有收到回复。"
+  processing_error: "抱歉，处理请求时出错了。"
+  timeout: "抱歉，响应时间太长了。"
+  generic_error: "错误：{error}"
+  rate_limit: "抱歉，服务暂时不可用（请求太频繁）。请稍后再试。"
+
+# OpenClaw WebSocket error and activity messages
+ws_errors:
+  connection_lost: "抱歉，与OpenClaw的连接断开了。请重新说一下你的请求。"
+  send_failed: "错误：无法通过WebSocket发送消息"
+  no_response: "抱歉，没有收到回复。"
+  timeout: "抱歉，响应时间太长了。"
+  request_aborted: "请求已中断。请重新说一次。"
+
+# Tool activity descriptions (spoken to user during long operations)
+tool_activity:
+  tool_error: "工具返回了错误，正在检查原因。"
+  opening_folder: "正在打开项目文件夹。"
+  browsing_structure: "正在浏览项目结构，查找文件。"
+  analyzing_file: "正在分析文件{path}。"
+  reading_code: "正在阅读和分析代码。"
+  searching_code: "正在搜索相关代码。"
+  running_tests: "正在检查代码并运行测试。"
+  editing_code: "正在修改代码。"
+  checking_repo: "正在检查仓库变更。"
+  project_steps: "正在执行项目步骤。"
+  running_command: "正在终端中运行命令。"
+  reading_files: "正在读取项目文件。"
+  searching_info: "正在代码中搜索信息。"
+  continuing_work: "继续处理任务。"
+  planning: "正在规划解决方案。"
+  error_checking: "出现了错误，正在检查发生了什么。"
+
+# Tool error classification messages
+tool_errors:
+  browser_not_connected: "OpenClaw浏览器扩展未连接。请在活动标签页中打开扩展。"
+  tool_unavailable: "工具{name}暂时不可用。"
+  timeout: "请求时间太长。请再试一次。"
+  rate_limit: "请求太频繁。请稍等片刻再试。"
+  auth_error: "授权错误。请检查连接设置。"
+  generic_error: "错误：{error}"
+  default_tool_name: "服务"
