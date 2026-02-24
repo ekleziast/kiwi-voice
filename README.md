@@ -253,13 +253,19 @@ language: "en"   # or "ru", etc.
 2. Translate all strings
 3. Set `language: "{lang}"` in `config.yaml`
 
-Currently shipped: **Russian** (`ru`) and **English** (`en`).
+Currently shipped — **15 languages:**
+
+| | | | |
+|---|---|---|---|
+| `ru` Russian | `en` English | `es` Spanish | `pt` Portuguese |
+| `fr` French | `it` Italian | `de` German | `tr` Turkish |
+| `pl` Polish | `zh` Chinese | `ja` Japanese | `ko` Korean |
+| `hi` Hindi | `ar` Arabic | `id` Indonesian | |
 
 ## Roadmap
 
 - [ ] Web UI for configuration
 - [ ] Plugin system for custom wake words
-- [ ] More language packs (Spanish, German, French, Portuguese, Chinese, Japanese)
 - [ ] Home Assistant integration
 
 ## License
