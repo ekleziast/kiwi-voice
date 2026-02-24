@@ -248,10 +248,9 @@ Console codepage is set for Unicode output via `ctypes.windll.kernel32.SetConsol
 
 ## Key Documentation
 
-- `AI_NOTES.md` — detailed architecture notes, roadmap phases, and changelog (in Russian)
 - `SKILL.md` — voice commands, security hierarchy, and deployment info (in Russian)
 
-## Roadmap Status (from AI_NOTES.md)
+## Roadmap Status
 
 - Phase 1: Stability & Observability — **done**
 - Phase 2: State machine (IDLE → LISTENING → PROCESSING → SPEAKING) — **done**

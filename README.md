@@ -14,10 +14,6 @@
   <a href="https://github.com/openclaw/openclaw"><img src="https://img.shields.io/badge/backend-OpenClaw-orange.svg" alt="OpenClaw"></a>
 </p>
 
-<p align="center">
-  <a href="README.ru.md">🇷🇺 Документация на русском</a>
-</p>
-
 ---
 
 ## What is Kiwi Voice?
