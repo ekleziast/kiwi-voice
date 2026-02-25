@@ -490,6 +490,7 @@ function getEventCssClass(eventType) {
     if (upper.includes('SPEAKER') || upper.includes('IDENTIFY')) return 'speaker';
     if (upper.includes('LLM') || upper.includes('THINK')) return 'llm';
     if (upper.includes('VAD')) return 'vad';
+    if (upper.includes('APPROVAL') || upper.includes('EXEC')) return 'error';
     return 'system';
 }
 
@@ -683,6 +684,25 @@ function updateStatusFromEvent(eventType, payload) {
         if (name) {
             document.getElementById('status-speaker').textContent = name;
         }
+    }
+
+    // Exec approval events
+    if (upper.includes('EXEC_APPROVAL_REQUESTED')) {
+        const cmd = payload.command || '';
+        const short = cmd.length > 60 ? cmd.substring(0, 60) + '...' : cmd;
+        document.getElementById('status-exec-approval').innerHTML =
+            '<span class="indicator-on" title="' + escapeHtml(cmd) + '">Pending: ' + escapeHtml(short) + '</span>';
+    }
+    if (upper.includes('EXEC_APPROVAL_RESOLVED')) {
+        const decision = payload.decision || 'unknown';
+        const cls = decision.startsWith('allow') ? 'indicator-on' : 'indicator-off';
+        document.getElementById('status-exec-approval').innerHTML =
+            '<span class="' + cls + '">' + escapeHtml(decision) + '</span>';
+        // Clear after 10 seconds
+        setTimeout(() => {
+            const el = document.getElementById('status-exec-approval');
+            if (el) el.innerHTML = '<span class="indicator-off">None</span>';
+        }, 10000);
     }
 
     // Soul change events

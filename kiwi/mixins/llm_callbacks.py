@@ -7,6 +7,12 @@ from kiwi.state_machine import DialogueState
 from kiwi.utils import kiwi_log
 from kiwi.i18n import t
 
+try:
+    from kiwi.event_bus import EventType, get_event_bus
+    _EB_AVAILABLE = True
+except ImportError:
+    _EB_AVAILABLE = False
+
 
 class LLMCallbacksMixin:
     """WebSocket callback handlers for streaming LLM responses."""
@@ -176,6 +182,15 @@ class LLMCallbacksMixin:
 
         kiwi_log("EXEC-APPROVAL", f"OpenClaw requests approval: '{command[:100]}'", level="INFO")
 
+        # Publish event for dashboard
+        if _EB_AVAILABLE:
+            try:
+                get_event_bus().publish(EventType.EXEC_APPROVAL_REQUESTED,
+                    {'id': approval_id, 'command': command},
+                    source='exec_approval')
+            except Exception:
+                pass
+
         # Store pending approval
         self._pending_exec_approval = {
             "id": approval_id,
@@ -259,6 +274,15 @@ class LLMCallbacksMixin:
 
         decision = "allow-once" if approved else "deny"
         self.openclaw.resolve_exec_approval(approval_id, decision)
+
+        # Publish event for dashboard
+        if _EB_AVAILABLE:
+            try:
+                get_event_bus().publish(EventType.EXEC_APPROVAL_RESOLVED,
+                    {'id': approval_id, 'decision': decision},
+                    source='exec_approval')
+            except Exception:
+                pass
 
         if approved:
             self.speak(t("responses.exec_approved") or "Approved. Running the command.", style="confident")

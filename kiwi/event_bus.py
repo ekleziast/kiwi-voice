@@ -68,6 +68,10 @@ class EventType(Enum):
     HA_COMMAND_RESPONSE = auto()
     HA_CONNECTION_CHANGED = auto()
 
+    # Exec Approval (OpenClaw post-filter)
+    EXEC_APPROVAL_REQUESTED = auto()
+    EXEC_APPROVAL_RESOLVED = auto()
+
     # System
     SYSTEM_STARTUP = auto()
     SYSTEM_SHUTDOWN = auto()

@@ -187,9 +187,24 @@ BLOCKED (priority 99) — Completely ignored
 
 > 💡 Voice commands are language-dependent. Set `language` in `config.yaml` to match your locale. See `kiwi/locales/*.yaml` for the full command lists.
 
+### Two-Layer Security
+
+**Pre-filter (Kiwi)** — catches dangerous commands *before* they reach the LLM:
+- Regex-based `DangerousCommandDetector` classifies commands as SAFE / WARNING / DANGEROUS / CRITICAL
+- Non-owner actionable commands are held until owner approves (by voice or Telegram)
+
+**Post-filter (OpenClaw)** — catches dangerous shell commands the LLM tries to execute:
+- When the OpenClaw agent calls the `exec` tool, the Gateway broadcasts an `exec.approval.requested` event
+- Kiwi subscribes to this event, announces the command to the owner via voice
+- Owner approves/denies by voice ("allow" / "deny") or via Telegram inline buttons
+- Decision is sent back to OpenClaw via `exec.approval.resolve`
+- Auto-deny on timeout (55s) if no response
+
+This means even if a voice command passes the pre-filter, the actual shell execution still requires approval through OpenClaw's own security layer.
+
 ### Telegram Approval
 
-When a non-owner speaker issues a potentially dangerous command, Kiwi sends a confirmation request to the owner via Telegram. The owner can approve or deny it from their phone.
+When a non-owner speaker issues a potentially dangerous command, Kiwi sends a confirmation request to the owner via Telegram. The owner can approve or deny it from their phone. Telegram is also used as a secondary channel for OpenClaw exec approvals.
 
 Set `KIWI_TELEGRAM_BOT_TOKEN` and `KIWI_TELEGRAM_CHAT_ID` in `.env` to enable.
 
