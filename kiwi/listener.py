@@ -459,10 +459,14 @@ class KiwiListener:
         self.whisper_prompt = t("wake_word.whisper_prompt") or WHISPER_INITIAL_PROMPT
         _typos = t("wake_word.typos")
         self.wake_word_typos = _typos if isinstance(_typos, dict) else WAKE_WORD_TYPOS
-        self.fuzzy_blacklist = set(t("wake_word.fuzzy_blacklist") or FUZZY_BLACKLIST)
-        self.hallucination_phrases = set(t("hallucinations.phrases") or WHISPER_HALLUCINATION_PATTERNS)
-        self.phantom_phrases = t("hallucinations.phantom_phrases") or PHANTOM_PHRASES
-        self.phantom_patterns = t("hallucinations.phantom_patterns") or PHANTOM_PATTERNS
+        _blacklist = t("wake_word.fuzzy_blacklist")
+        self.fuzzy_blacklist = set(_blacklist if isinstance(_blacklist, list) else FUZZY_BLACKLIST)
+        _phrases = t("hallucinations.phrases")
+        self.hallucination_phrases = set(_phrases if isinstance(_phrases, list) else WHISPER_HALLUCINATION_PATTERNS)
+        _phantom_phr = t("hallucinations.phantom_phrases")
+        self.phantom_phrases = _phantom_phr if isinstance(_phantom_phr, list) else PHANTOM_PHRASES
+        _phantom_pat = t("hallucinations.phantom_patterns")
+        self.phantom_patterns = _phantom_pat if isinstance(_phantom_pat, list) else PHANTOM_PATTERNS
 
         self.detector = WakeWordDetector(
             wake_word=self.wake_word,

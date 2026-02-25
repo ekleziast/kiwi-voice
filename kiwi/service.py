@@ -149,6 +149,9 @@ class KiwiServiceOpenClaw(
     def __init__(self, config: Optional[KiwiConfig] = None):
         self.config = config or KiwiConfig()
 
+        # Initialize i18n early — before any component that calls t()
+        i18n_setup(self.config.language)
+
         # Flag: whether the system prompt has already been sent
         self._system_prompt_sent = False
 
@@ -507,9 +510,6 @@ class KiwiServiceOpenClaw(
         """Start the service with startup sound and greeting."""
         if self.is_running:
             return
-
-        # Initialize i18n before any t() calls
-        i18n_setup(self.config.language)
 
         with open(os.path.join(LOGS_DIR, 'kiwi_startup.log'), 'a', encoding='utf-8') as f:
             f.write('[START] KiwiServiceOpenClaw.start() called\n')
