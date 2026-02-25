@@ -34,7 +34,7 @@ llm:
 # TTS
 # ---------------------------------------------------------------------------
 tts:
-  # provider: elevenlabs | piper | qwen3
+  # provider: elevenlabs | piper | qwen3 | kokoro
   provider: "elevenlabs"
 
   # Qwen3-TTS settings (provider=qwen3)
@@ -48,6 +48,15 @@ tts:
 
   # Piper settings (provider=piper)
   piper_model_path: "./piper-models/ru_RU-irina-medium.onnx"
+
+  # Kokoro ONNX settings (provider=kokoro)
+  # Free, local TTS. Models auto-download on first use (~340MB).
+  # Supported languages: en, ja, zh, ko, fr, de, it, es, pt, pl, tr, hi
+  # Note: Russian is NOT supported by Kokoro v1.0.
+  kokoro:
+    voice: "af_heart"            # af_heart, af_star, am_adam, bf_emma, bm_george, ...
+    speed: 1.0                   # 0.5 = slow, 1.0 = normal, 2.0 = fast
+    model_dir: "./models/kokoro"
 
   # ElevenLabs settings (provider=elevenlabs)
   # API key: .env → KIWI_ELEVENLABS_API_KEY
@@ -84,20 +93,33 @@ tts:
   poll_interval: 0.3
 
 # ---------------------------------------------------------------------------
-# STT (Faster Whisper)
+# STT (Speech-to-Text)
 # ---------------------------------------------------------------------------
+# engine: "faster-whisper" (default, CUDA/CPU)
+#        | "mlx-whisper"   (Apple Silicon only, requires lightning-whisper-mlx)
 stt:
+  engine: "faster-whisper"
   model: "large"
   device: "cuda"
   compute_type: "float16"
   language: "ru"
+  mlx_batch_size: 12
 
 # ---------------------------------------------------------------------------
 # Wake Word
 # ---------------------------------------------------------------------------
+# engine: "text" (legacy fuzzy matching on transcribed text)
+#       | "openwakeword" (ML-based detection on raw audio, low latency)
+#
+# For openwakeword: set model to a built-in name (hey_jarvis, alexa,
+# hey_mycroft) or path to a custom .onnx file (see scripts/train_wake_word.py).
+# threshold: 0.0 (loose) to 1.0 (strict), default 0.5.
 wake_word:
+  engine: "text"
   keyword: "киви"
   position_limit: 3
+  model: "hey_jarvis"
+  threshold: 0.5
 
 # ---------------------------------------------------------------------------
 # Audio

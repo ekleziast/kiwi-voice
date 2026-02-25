@@ -81,7 +81,7 @@ class KiwiConfig:
     ws_ping_timeout: float = 20.0
 
     # TTS settings
-    # provider: "qwen3" | "piper" | "elevenlabs"
+    # provider: "qwen3" | "piper" | "elevenlabs" | "kokoro"
     # qwen backend: "runpod" | "local"
     tts_provider: str = "qwen3"
     tts_qwen_backend: str = "runpod"
@@ -116,15 +116,28 @@ class KiwiConfig:
         }
     )
 
+    # Kokoro TTS settings
+    tts_kokoro_voice: str = "af_heart"
+    tts_kokoro_speed: float = 1.0
+    tts_kokoro_model_dir: Optional[str] = None
+
     stt_model: str = "base"
     stt_device: str = "cpu"
     stt_compute_type: str = "int8"
     stt_language: str = "ru"
 
+    # STT engine: "faster-whisper" | "mlx-whisper"
+    stt_engine: str = "faster-whisper"
+    stt_mlx_batch_size: int = 12
+
     sample_rate: int = 24000
     output_device: Optional[str] = None
     wake_word_keyword: str = "киви"
     wake_word_position_limit: int = 3
+    # Wake word engine: "text" (legacy fuzzy match) | "openwakeword" (ML model)
+    wake_word_engine: str = "text"
+    wake_word_model: str = "hey_jarvis"
+    wake_word_threshold: float = 0.5
 
     # Owner name (from speaker_priority.owner.name in config.yaml)
     owner_name: str = "Owner"
@@ -173,6 +186,8 @@ class KiwiConfig:
         config.stt_device = stt_cfg.get("device", config.stt_device)
         config.stt_compute_type = stt_cfg.get("compute_type", config.stt_compute_type)
         config.stt_language = stt_cfg.get("language", config.stt_language)
+        config.stt_engine = str(stt_cfg.get("engine", config.stt_engine)).strip().lower()
+        config.stt_mlx_batch_size = int(stt_cfg.get("mlx_batch_size", config.stt_mlx_batch_size))
 
         raw_use_local_tts = tts_cfg.get("use_local_tts", config.use_local_tts)
         if isinstance(raw_use_local_tts, str):
@@ -192,6 +207,17 @@ class KiwiConfig:
         config.tts_local_tokenizer_path = tts_cfg.get("local_tokenizer_path", config.tts_local_tokenizer_path)
         config.tts_qwen_device = tts_cfg.get("qwen_device", config.tts_qwen_device)
         config.tts_piper_model_path = tts_cfg.get("piper_model_path", config.tts_piper_model_path)
+        # Kokoro TTS settings
+        kokoro_cfg = tts_cfg.get("kokoro", {}) if isinstance(tts_cfg.get("kokoro"), dict) else {}
+        config.tts_kokoro_voice = str(
+            kokoro_cfg.get("voice", tts_cfg.get("kokoro_voice", config.tts_kokoro_voice))
+        ).strip()
+        config.tts_kokoro_speed = float(
+            kokoro_cfg.get("speed", tts_cfg.get("kokoro_speed", config.tts_kokoro_speed))
+        )
+        kokoro_model_dir = kokoro_cfg.get("model_dir", tts_cfg.get("kokoro_model_dir", config.tts_kokoro_model_dir))
+        if kokoro_model_dir:
+            config.tts_kokoro_model_dir = str(kokoro_model_dir).strip()
         config.tts_elevenlabs_api_key = eleven_cfg.get(
             "api_key",
             tts_cfg.get("elevenlabs_api_key", config.tts_elevenlabs_api_key),
@@ -290,6 +316,15 @@ class KiwiConfig:
             ).strip() or "киви"
             config.wake_word_position_limit = int(
                 wake_cfg.get("position_limit", config.wake_word_position_limit)
+            )
+            config.wake_word_engine = str(
+                wake_cfg.get("engine", config.wake_word_engine)
+            ).strip().lower()
+            config.wake_word_model = str(
+                wake_cfg.get("model", config.wake_word_model)
+            ).strip()
+            config.wake_word_threshold = float(
+                wake_cfg.get("threshold", config.wake_word_threshold)
             )
 
         # LLM settings from YAML
@@ -421,6 +456,14 @@ class KiwiConfig:
             config.wake_word_keyword = os.getenv("KIWI_WAKE_WORD").strip() or "киви"
         if os.getenv("KIWI_WAKE_POSITION_LIMIT"):
             config.wake_word_position_limit = int(os.getenv("KIWI_WAKE_POSITION_LIMIT"))
+        if os.getenv("KIWI_WAKE_ENGINE"):
+            config.wake_word_engine = os.getenv("KIWI_WAKE_ENGINE").strip().lower()
+        if os.getenv("KIWI_WAKE_MODEL"):
+            config.wake_word_model = os.getenv("KIWI_WAKE_MODEL").strip()
+        if os.getenv("KIWI_WAKE_THRESHOLD"):
+            config.wake_word_threshold = float(os.getenv("KIWI_WAKE_THRESHOLD"))
+        if os.getenv("KIWI_STT_ENGINE"):
+            config.stt_engine = os.getenv("KIWI_STT_ENGINE").strip().lower()
 
         if os.getenv("KIWI_USE_LOCAL_TTS"):
             config.use_local_tts = os.getenv("KIWI_USE_LOCAL_TTS").lower() in ("true", "1", "yes")
@@ -488,9 +531,11 @@ class KiwiConfig:
             "eleven": "elevenlabs",
             "eleven_labs": "elevenlabs",
             "11labs": "elevenlabs",
+            "kokoro_onnx": "kokoro",
+            "kokoro-onnx": "kokoro",
         }
         config.tts_provider = provider_aliases.get(config.tts_provider, config.tts_provider)
-        if config.tts_provider not in {"qwen3", "piper", "elevenlabs"}:
+        if config.tts_provider not in {"qwen3", "piper", "elevenlabs", "kokoro"}:
             kiwi_log("CONFIG", f"Unknown tts.provider='{config.tts_provider}', fallback to qwen3", level="WARNING")
             config.tts_provider = "qwen3"
         if config.tts_qwen_backend not in {"local", "runpod"}:
@@ -505,6 +550,7 @@ class KiwiConfig:
         config.tts_elevenlabs_voice_id = normalize_elevenlabs_voice_id(config.tts_elevenlabs_voice_id)
         config.use_local_tts = (
             config.tts_provider == "piper"
+            or config.tts_provider == "kokoro"
             or (config.tts_provider == "qwen3" and config.tts_qwen_backend == "local")
         )
         if config.tts_provider == "qwen3" and config.tts_qwen_backend == "local":
@@ -552,11 +598,16 @@ class KiwiConfig:
     def print_config_banner(self):
         """Print a startup summary with ASCII-safe formatting."""
         stt_device_label = "CUDA" if self.stt_device == "cuda" else "CPU"
+        stt_engine_label = "MLX Whisper" if self.stt_engine == "mlx-whisper" else "Faster Whisper"
         tts_device_label = None
         if self.tts_provider == "piper":
             tts_type = "Piper (local)"
             tts_model = self.tts_piper_model_path or "ru_RU-irina-medium.onnx"
             tts_voice = self.tts_voice
+        elif self.tts_provider == "kokoro":
+            tts_type = "Kokoro ONNX (local)"
+            tts_model = self.tts_kokoro_model_dir or "models/kokoro"
+            tts_voice = self.tts_kokoro_voice
         elif self.tts_provider == "elevenlabs":
             tts_type = "ElevenLabs (cloud)"
             tts_model = self.tts_elevenlabs_model_id
@@ -571,17 +622,25 @@ class KiwiConfig:
             tts_model = self.tts_endpoint_id
             tts_voice = self.tts_voice
 
+        wake_engine_label = "OpenWakeWord" if self.wake_word_engine == "openwakeword" else "Text (fuzzy match)"
+
         line = "=" * 58
         print("\n" + line)
         print("KIWI VOICE SERVICE")
         print(line)
-        print(f"STT   : Faster Whisper ({self.stt_model})")
+        print(f"STT   : {stt_engine_label} ({self.stt_model})")
         print(f"\t\tDevice: {stt_device_label}")
         print(f"TTS   : {tts_type}")
         print(f"\t\tModel : {tts_model}")
         if tts_device_label:
             print(f"\t\tDevice: {tts_device_label}")
         print(f"\t\tVoice : {tts_voice}")
+        print(f"Wake  : {wake_engine_label}")
+        if self.wake_word_engine == "openwakeword":
+            print(f"\t\tModel : {self.wake_word_model}")
+            print(f"\t\tThreshold: {self.wake_word_threshold}")
+        else:
+            print(f"\t\tKeyword: {self.wake_word_keyword}")
         print("VAD   : Silero VAD (ONNX)")
         print(f"LLM   : OpenClaw (session: {self.openclaw_session_id})")
         print(f"Lang  : {self.stt_language.upper()}")

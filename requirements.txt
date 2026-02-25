@@ -40,3 +40,13 @@ cryptography>=41.0.0
 
 # REST API server
 aiohttp>=3.9.0
+
+# Kokoro ONNX TTS (local, free)
+kokoro-onnx>=0.4.0
+
+# OpenWakeWord (ML-based wake word detection)
+openwakeword>=0.6.0
+
+# MLX Whisper — Apple Silicon only (optional)
+# Uncomment on macOS with Apple Silicon:
+# lightning-whisper-mlx>=0.4.0

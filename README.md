@@ -5,7 +5,7 @@
 <h1 align="center">Kiwi Voice</h1>
 
 <p align="center">
-  <strong>OpenClaw voice assistant — speaker ID, voice-gated command approval, barge-in interrupts, and sentence-aware streaming TTS</strong>
+  <strong>OpenClaw voice assistant — ML wake word, speaker ID, voice-gated security, multi-provider TTS, and Apple Silicon support</strong>
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
 
 ## What is Kiwi Voice?
 
-Kiwi Voice is a real-time voice interface that turns [OpenClaw](https://github.com/openclaw/openclaw) into a hands-free assistant. It captures audio from your microphone, recognizes speech locally via Faster Whisper, identifies *who* is speaking, enforces voice-based security policies, talks to any LLM through OpenClaw's WebSocket gateway, and speaks the response back — all in a continuous loop.
+Kiwi Voice is a real-time voice interface that turns [OpenClaw](https://github.com/openclaw/openclaw) into a hands-free assistant. It captures audio from your microphone, detects the wake word via ML model or text matching, recognizes speech locally via Faster Whisper (or MLX Whisper on Apple Silicon), identifies *who* is speaking, enforces voice-based security policies, talks to any LLM through OpenClaw's WebSocket gateway, and speaks the response back through one of five TTS providers — all in a continuous loop.
 
 Think of it as Alexa/Siri, but self-hosted, privacy-first, and plugged into your own AI stack.
 
@@ -30,20 +30,23 @@ Think of it as Alexa/Siri, but self-hosted, privacy-first, and plugged into your
 
 | Feature | Description |
 |---------|-------------|
-| 🗣️ **Wake Word** | Activate with a configurable keyword (default: *"kiwi"*) |
+| 🗣️ **Wake Word** | Text-based fuzzy matching or **ML detection via OpenWakeWord** — low-latency ONNX model on raw audio (~2% CPU) |
 | 🎭 **Speaker ID** | Voiceprint recognition via pyannote embeddings — knows who's talking |
 | 🔐 **Voice Security** | Priority hierarchy (Owner → Friend → Guest → Blocked) with Telegram approval for dangerous commands |
-| 🔊 **Multi-Provider TTS** | ElevenLabs (cloud), Piper (local/free), Qwen3-TTS (local GPU / RunPod serverless) |
+| 🔊 **Multi-Provider TTS** | ElevenLabs (cloud), Piper (local/free), Qwen3-TTS (local GPU / RunPod), **Kokoro ONNX** (local/free, 14 voices) |
 | ⚡ **Streaming TTS** | Sentence-aware chunking — starts speaking before the LLM finishes |
 | 🛑 **Barge-In** | Interrupt the assistant mid-sentence by speaking over it |
 | 🧠 **Auto-Learning** | Automatically remembers new voices after first interaction |
 | 🔌 **WebSocket** | Native OpenClaw Gateway v3 protocol with delta/final streaming |
 | 🌍 **Multi-Language** | Built-in i18n with YAML locale files — switch language with a single config field |
+| 🍎 **MLX Whisper** | Optional Apple Silicon optimized STT via Lightning Whisper MLX (~10x faster on M-series) |
 
 ## Architecture
 
 ```
-Mic → VAD + Energy Detection → Faster Whisper STT → Wake Word Check
+Mic → [OpenWakeWord OR VAD + Energy Detection]
+  → Faster Whisper STT (or MLX Whisper on Apple Silicon)
+  → Wake Word Check (text fuzzy match or ML pre-detection)
   → Speaker ID (pyannote) → Priority Gate → Voice Security
   → OpenClaw Gateway (WebSocket) → LLM response stream
   → Real-time streaming TTS → Speaker Output (with barge-in)
@@ -87,18 +90,22 @@ Edit `config.yaml` to match your setup:
 # Language: controls UI strings, STT, TTS, wake word, and command patterns
 language: "ru"               # ru | en (add more in kiwi/locales/)
 
-# TTS provider: elevenlabs | piper | qwen3
+# TTS provider: elevenlabs | piper | qwen3 | kokoro
 tts:
   provider: "piper"          # Free, local, no API key needed
 
-# STT model
+# STT engine
 stt:
+  engine: "faster-whisper"   # faster-whisper | mlx-whisper (Apple Silicon)
   model: "small"             # small = fast, large = accurate
   device: "cuda"             # cuda | cpu
 
 # Wake word
 wake_word:
+  engine: "text"             # text (fuzzy match) | openwakeword (ML model)
   keyword: "kiwi"
+  model: "hey_jarvis"        # OpenWakeWord model (built-in or path to .onnx)
+  threshold: 0.5             # Detection sensitivity (0.0–1.0)
 
 # Owner name (used for voice commands like "I'm <name>")
 speaker_priority:
@@ -130,12 +137,31 @@ python -m kiwi
 | **ElevenLabs** | Excellent | ~0.3–0.5s | ~$0.30/1K chars | No |
 | **Qwen3-TTS (local)** | High | ~1–3s | Free | Yes (CUDA) |
 | **Qwen3-TTS (RunPod)** | High | ~2–5s | ~$0.0003/sec | No |
+| **Kokoro ONNX** | High | <0.5s | Free | No |
 | **Piper** | Good | <0.5s | Free | No |
 
 Switch providers in `config.yaml` or via environment variable:
 
 ```bash
-KIWI_TTS_PROVIDER=piper python -m kiwi
+KIWI_TTS_PROVIDER=kokoro python -m kiwi
+```
+
+> **Kokoro ONNX** — free, fully local TTS with 14 voices at 24kHz. Models auto-download on first use (~340MB). Supports English, Japanese, Chinese, Korean, and several European languages. Russian is not yet supported.
+
+## OpenWakeWord (ML Wake Word Detection)
+
+Instead of running full Whisper transcription to detect the wake word, you can use **OpenWakeWord** — a small ONNX model (~10MB) that listens to raw audio in real time with ~80ms latency and ~2% CPU usage.
+
+```yaml
+wake_word:
+  engine: "openwakeword"
+  model: "hey_jarvis"        # Built-in: hey_jarvis, alexa, hey_mycroft
+  threshold: 0.5
+```
+
+**Train a custom wake word** (e.g. "hey kiwi") using Google Colab — no voice recordings needed:
+```bash
+python scripts/train_wake_word.py --phrase "hey kiwi"
 ```
 
 ## Voice Security
@@ -176,7 +202,11 @@ Set `KIWI_TELEGRAM_BOT_TOKEN` and `KIWI_TELEGRAM_CHAT_ID` in `.env` to enable.
 | `RUNPOD_TTS_ENDPOINT_ID` | RunPod endpoint ID |
 | `KIWI_TELEGRAM_BOT_TOKEN` | Telegram bot token (voice security) |
 | `KIWI_TELEGRAM_CHAT_ID` | Telegram chat ID for approval messages |
-| `KIWI_TTS_PROVIDER` | Override TTS provider |
+| `KIWI_TTS_PROVIDER` | Override TTS provider (`elevenlabs`, `piper`, `qwen3`, `kokoro`) |
+| `KIWI_WAKE_ENGINE` | Override wake word engine (`text`, `openwakeword`) |
+| `KIWI_WAKE_MODEL` | Override OpenWakeWord model name or path |
+| `KIWI_WAKE_THRESHOLD` | Override OpenWakeWord detection threshold |
+| `KIWI_STT_ENGINE` | Override STT engine (`faster-whisper`, `mlx-whisper`) |
 | `KIWI_FFMPEG_PATH` | Custom FFmpeg path |
 | `KIWI_LANGUAGE` | Override language/locale (`ru`, `en`, etc.) |
 | `KIWI_DEBUG` | Enable debug logging |

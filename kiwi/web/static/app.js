@@ -132,8 +132,11 @@ function updateConfig(data) {
         if (el) el.textContent = value || '--';
     };
     set('config-wake-word', data.wake_word);
+    set('config-wake-engine', data.wake_word_engine || 'text');
+    set('config-stt-engine', data.stt_engine || 'faster-whisper');
     set('config-stt-model', data.stt_model);
     set('config-stt-device', data.stt_device);
+    set('config-tts-provider', data.tts_provider);
     set('config-llm-model', data.llm_model);
     set('config-sample-rate', data.sample_rate ? `${data.sample_rate} Hz` : null);
 

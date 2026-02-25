@@ -91,6 +91,13 @@ from kiwi.tts.piper import PiperTTS
 from kiwi.tts.qwen_local import LocalQwenTTSClient, LocalQwenTTSConfig
 from kiwi.tts.elevenlabs import ElevenLabsTTSClient, ElevenLabsTTSConfig
 
+# Kokoro TTS (local, free)
+try:
+    from kiwi.tts.kokoro import KokoroTTS
+    KOKORO_AVAILABLE = True
+except ImportError:
+    KOKORO_AVAILABLE = False
+
 # Speaker Manager + Voice Security
 try:
     from kiwi.speaker_manager import SpeakerManager, VoicePriority
@@ -252,6 +259,19 @@ class KiwiServiceOpenClaw(
             self.tts = PiperTTS(model_path=self.config.tts_piper_model_path)
             self.use_local_tts = True
             kiwi_log("TTS", "Initialized Piper TTS (local)", level="INFO")
+        elif self.tts_provider == "kokoro":
+            if not KOKORO_AVAILABLE:
+                kiwi_log("TTS", "Kokoro ONNX not installed (pip install kokoro-onnx), falling back to Piper", level="WARNING")
+                self.tts = PiperTTS(model_path=self.config.tts_piper_model_path)
+            else:
+                self.tts = KokoroTTS(
+                    voice=self.config.tts_kokoro_voice,
+                    speed=self.config.tts_kokoro_speed,
+                    lang=self.config.language,
+                    model_dir=self.config.tts_kokoro_model_dir,
+                )
+                kiwi_log("TTS", f"Initialized Kokoro ONNX TTS (voice={self.config.tts_kokoro_voice})", level="INFO")
+            self.use_local_tts = True
         elif self.tts_provider == "elevenlabs":
             elevenlabs_config = ElevenLabsTTSConfig(
                 api_key=self.config.tts_elevenlabs_api_key,
@@ -314,6 +334,9 @@ class KiwiServiceOpenClaw(
             compute_type=self.config.stt_compute_type,
             wake_word=self.config.wake_word_keyword,
             position_limit=self.config.wake_word_position_limit,
+            wake_word_engine=self.config.wake_word_engine,
+            wake_word_model=self.config.wake_word_model,
+            wake_word_threshold=self.config.wake_word_threshold,
         )
         self.listener = KiwiListener(
             config=listener_config,
