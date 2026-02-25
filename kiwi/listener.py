@@ -430,7 +430,9 @@ class WakeWordDetector:
         return True, command
 
     def _extract_command(self, text: str, wake_word_end: int) -> Optional[str]:
-        command = text[wake_word_end:].strip(" \t\n\r,.:;!?-")
+        # Strip separators between wake word and command from the left;
+        # preserve sentence-ending punctuation (.!?) on the right for completeness detection.
+        command = text[wake_word_end:].lstrip(" \t\n\r,.:;!?-").rstrip(" \t\n\r,;-")
         if not command:
             return None
         # Discard single-punctuation 'commands' (e.g., '.') to avoid
