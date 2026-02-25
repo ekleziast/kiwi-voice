@@ -31,6 +31,6 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: |
-          pip install pyyaml python-dotenv requests aiohttp cryptography numpy websocket-client pytest
+          pip install pyyaml python-dotenv requests aiohttp cryptography numpy websocket-client pydub soundfile pytest
       - name: Run tests
         run: pytest tests/ -v --tb=short
