@@ -38,6 +38,9 @@ logs/
 # Claude Code (personal workspace data)
 .claude/
 
+# MkDocs build output
+site/
+
 # Test / OS caches
 .pytest_cache/
 Thumbs.db

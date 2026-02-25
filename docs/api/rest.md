@@ -1,6 +1,8 @@
-# Kiwi Voice REST API
+# REST API
 
 Base URL: `http://localhost:7789`
+
+All endpoints return JSON. The API is served by the same aiohttp server as the dashboard.
 
 ## Status & Config
 
@@ -44,7 +46,8 @@ Returns current configuration (safe fields only, no secrets).
 
 Update configuration at runtime.
 
-**Body:**
+**Request:**
+
 ```json
 {
   "language": "ru",
@@ -53,7 +56,13 @@ Update configuration at runtime.
 }
 ```
 
-**Response:** `{"updated": {"language": "ru"}}`
+**Response:**
+
+```json
+{"updated": {"language": "ru"}}
+```
+
+---
 
 ## Speakers
 
@@ -79,15 +88,29 @@ List all known speaker profiles.
 
 ### `DELETE /api/speakers/{speaker_id}`
 
-Remove a speaker profile. **Response:** `{"deleted": "spk_001"}`
+Remove a speaker profile.
+
+```json
+{"deleted": "spk_001"}
+```
 
 ### `POST /api/speakers/{speaker_id}/block`
 
-Block a speaker. **Response:** `{"blocked": "spk_001"}`
+Block a speaker.
+
+```json
+{"blocked": "spk_001"}
+```
 
 ### `POST /api/speakers/{speaker_id}/unblock`
 
-Unblock a speaker. **Response:** `{"unblocked": "spk_001"}`
+Unblock a speaker.
+
+```json
+{"unblocked": "spk_001"}
+```
+
+---
 
 ## Languages
 
@@ -104,8 +127,11 @@ Unblock a speaker. **Response:** `{"unblocked": "spk_001"}`
 
 Switch language at runtime.
 
-**Body:** `{"language": "ru"}`
+**Request:** `{"language": "ru"}`
+
 **Response:** `{"language": "ru"}`
+
+---
 
 ## Souls (Personalities)
 
@@ -126,42 +152,85 @@ List all available personalities.
 ### `GET /api/soul/current`
 
 ```json
-{"id": "default", "name": "Default", "description": "...", "nsfw": false, "model": "claude-sonnet"}
+{
+  "id": "default",
+  "name": "Default",
+  "description": "...",
+  "nsfw": false,
+  "model": "claude-sonnet"
+}
 ```
 
 ### `POST /api/soul`
 
 Switch personality.
 
-**Body:** `{"soul": "comedian"}`
-**Response:** `{"soul": "comedian", "name": "Comedian", "nsfw": false, "model": "claude-sonnet"}`
+**Request:** `{"soul": "comedian"}`
+
+**Response:**
+
+```json
+{
+  "soul": "comedian",
+  "name": "Comedian",
+  "nsfw": false,
+  "model": "claude-sonnet"
+}
+```
+
+---
 
 ## TTS
 
 ### `POST /api/tts/test`
 
-Speak a test phrase.
+Speak a test phrase through the current TTS provider.
 
-**Body:** `{"text": "Hello, I am Kiwi!"}` (optional, uses default if omitted)
-**Response:** `{"status": "speaking", "text": "Hello, I am Kiwi!"}`
+**Request:** `{"text": "Hello, I am Kiwi!"}` (optional — uses default if omitted)
+
+**Response:**
+
+```json
+{"status": "speaking", "text": "Hello, I am Kiwi!"}
+```
+
+---
 
 ## Controls
 
 ### `POST /api/stop`
 
-Stop current TTS playback. **Response:** `{"status": "stopped"}`
+Stop current TTS playback.
+
+```json
+{"status": "stopped"}
+```
 
 ### `POST /api/reset-context`
 
-Reset conversation context. **Response:** `{"status": "context_reset"}`
+Reset conversation context (clears LLM history).
+
+```json
+{"status": "context_reset"}
+```
 
 ### `POST /api/restart`
 
-Restart the service. **Response:** `{"status": "restarting"}`
+Restart the service.
+
+```json
+{"status": "restarting"}
+```
 
 ### `POST /api/shutdown`
 
-Shutdown the service. **Response:** `{"status": "shutting_down"}`
+Shutdown the service.
+
+```json
+{"status": "shutting_down"}
+```
+
+---
 
 ## Home Assistant
 
@@ -173,28 +242,27 @@ Shutdown the service. **Response:** `{"status": "shutting_down"}`
 
 ### `POST /api/homeassistant/command`
 
-Send a voice command to Home Assistant.
+Send a voice command to Home Assistant via the Conversation API.
 
-**Body:** `{"text": "turn on bedroom lights", "language": "en"}`
-**Response:** `{"response": "Done, bedroom lights are on.", "command": "turn on bedroom lights"}`
+**Request:**
 
-## WebSocket Events
+```json
+{"text": "turn on bedroom lights", "language": "en"}
+```
 
-### `GET /api/events` (WebSocket)
+**Response:**
 
-Real-time event stream. Connect via WebSocket to receive all EventBus events.
-
-**Event format:**
 ```json
 {
-  "event": "WAKE_WORD_DETECTED",
-  "data": {"text": "kiwi"},
-  "timestamp": 1709000000.0,
-  "source": "listener"
+  "response": "Done, bedroom lights are on.",
+  "command": "turn on bedroom lights"
 }
 ```
 
-**Client commands:**
-- `{"type": "ping"}` → `{"event": "pong"}`
+---
 
-**Event types:** `STATE_CHANGED`, `WAKE_WORD_DETECTED`, `SPEECH_RECOGNIZED`, `SPEAKER_IDENTIFIED`, `TTS_STARTED`, `TTS_FINISHED`, `LLM_TOKEN`, `LLM_COMPLETE`, `APPROVAL_REQUESTED`, `APPROVAL_RESOLVED`, `EXEC_APPROVAL_REQUESTED`, `EXEC_APPROVAL_RESOLVED`, `SOUL_CHANGED`, `ERROR`
+## Web Audio
+
+### `WebSocket /api/audio`
+
+Bidirectional audio streaming for the browser microphone. See [Web Microphone](../features/web-microphone.md) for protocol details.

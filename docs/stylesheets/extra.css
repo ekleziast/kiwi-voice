@@ -1,0 +1,97 @@
+/* Kiwi Voice docs — brand overrides */
+
+:root {
+  --md-primary-fg-color: #0d9488;
+  --md-primary-bg-color: #f0fdfa;
+  --md-accent-fg-color: #14b8a6;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #14b8a6;
+  --md-primary-bg-color: #042f2e;
+  --md-default-bg-color: #0c1117;
+  --md-default-fg-color: #c9d1d9;
+  --md-code-bg-color: #161b22;
+}
+
+/* Hero on index page */
+.md-typeset .hero {
+  text-align: center;
+  padding: 2rem 0 3rem;
+}
+
+.md-typeset .hero h1 {
+  font-size: 2.8rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #14b8a6, #06b6d4, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 0.5rem;
+}
+
+.md-typeset .hero p {
+  font-size: 1.15rem;
+  opacity: 0.8;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* Feature grid */
+.md-typeset .feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.md-typeset .feature-card {
+  padding: 1.25rem;
+  border-radius: 8px;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  transition: border-color 0.2s;
+}
+
+.md-typeset .feature-card:hover {
+  border-color: var(--md-accent-fg-color);
+}
+
+.md-typeset .feature-card h3 {
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.md-typeset .feature-card p {
+  font-size: 0.85rem;
+  opacity: 0.8;
+  margin-bottom: 0;
+}
+
+/* Badge pills */
+.md-typeset .badge {
+  display: inline-block;
+  padding: 0.15em 0.5em;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.md-typeset .badge-free { background: #065f4620; color: #14b8a6; }
+.md-typeset .badge-paid { background: #f59e0b20; color: #f59e0b; }
+.md-typeset .badge-gpu { background: #8b5cf620; color: #a78bfa; }
+.md-typeset .badge-new { background: #ef444420; color: #f87171; }
+
+/* TTS comparison table — tighter */
+.md-typeset .tts-table th,
+.md-typeset .tts-table td {
+  padding: 0.5rem 0.75rem;
+  white-space: nowrap;
+}
+
+/* Screenshot with subtle shadow */
+.md-typeset .screenshot {
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  margin: 1.5rem 0;
+}
