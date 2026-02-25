@@ -14,7 +14,8 @@
   --md-code-bg-color: #161b22;
 }
 
-/* Dark header matching kiwi-voice.com */
+/* ── Header ── */
+
 [data-md-color-scheme="slate"] .md-header {
   background: #0a0d12;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -25,60 +26,137 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
-/* Hero on index page */
-.md-typeset .hero {
+/* ── Hero ── */
+
+.kv-hero {
   text-align: center;
-  padding: 2rem 0 3rem;
+  padding: 4rem 1.5rem 3.5rem;
+  position: relative;
 }
 
-.md-typeset .hero h1 {
-  font-size: 2.8rem;
+.kv-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 600px 300px at 50% 0%, rgba(20, 184, 166, 0.08), transparent),
+    radial-gradient(ellipse 400px 250px at 30% 60%, rgba(139, 92, 246, 0.04), transparent);
+  pointer-events: none;
+}
+
+.kv-hero-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.35em 1em;
+  border-radius: 100px;
+  border: 1px solid rgba(20, 184, 166, 0.3);
+  color: #14b8a6;
+  background: rgba(20, 184, 166, 0.06);
+  margin-bottom: 1.5rem;
+}
+
+.kv-hero-title {
+  font-size: clamp(2.4rem, 6vw, 3.6rem);
   font-weight: 800;
-  background: linear-gradient(135deg, #14b8a6, #06b6d4, #8b5cf6);
+  line-height: 1.1;
+  margin: 0 0 1.25rem;
+  background: linear-gradient(135deg, #14b8a6 0%, #06b6d4 40%, #8b5cf6 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  margin-bottom: 0.5rem;
 }
 
-.md-typeset .hero p {
-  font-size: 1.15rem;
-  opacity: 0.8;
-  max-width: 640px;
-  margin: 0 auto;
+.kv-hero-sub {
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  line-height: 1.65;
+  opacity: 0.75;
+  max-width: 600px;
+  margin: 0 auto 2.5rem;
 }
 
-/* Feature grid */
-.md-typeset .feature-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1rem;
-  margin: 2rem 0;
+.kv-hero-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
 }
 
-.md-typeset .feature-card {
-  padding: 1.25rem;
+.kv-hero-actions .md-button {
+  font-size: 0.9rem;
+  padding: 0.6em 1.8em;
   border-radius: 8px;
-  border: 1px solid var(--md-default-fg-color--lightest);
-  transition: border-color 0.2s;
 }
 
-.md-typeset .feature-card:hover {
-  border-color: var(--md-accent-fg-color);
+/* ── Sections ── */
+
+.kv-section {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2.5rem 0;
 }
 
-.md-typeset .feature-card h3 {
+.kv-section + .kv-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.kv-section h2 {
+  font-size: 1.6rem;
+  font-weight: 700;
   margin-top: 0;
-  font-size: 1rem;
+  margin-bottom: 1.25rem;
 }
 
-.md-typeset .feature-card p {
-  font-size: 0.85rem;
-  opacity: 0.8;
-  margin-bottom: 0;
+/* ── Feature grid ── */
+
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
 }
 
-/* Badge pills */
+.kv-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1.25rem 1.35rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.2s, background 0.2s, transform 0.2s;
+}
+
+.kv-card:hover {
+  border-color: rgba(20, 184, 166, 0.35);
+  background: rgba(20, 184, 166, 0.04);
+  transform: translateY(-2px);
+}
+
+.kv-card-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  margin-bottom: 0.25rem;
+}
+
+.kv-card strong {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--md-default-fg-color);
+}
+
+.kv-card > span:last-child {
+  font-size: 0.82rem;
+  line-height: 1.55;
+  opacity: 0.65;
+}
+
+/* ── Badge pills (used on feature pages) ── */
+
 .md-typeset .badge {
   display: inline-block;
   padding: 0.15em 0.5em;
@@ -90,19 +168,63 @@
 
 .md-typeset .badge-free { background: #065f4620; color: #14b8a6; }
 .md-typeset .badge-paid { background: #f59e0b20; color: #f59e0b; }
-.md-typeset .badge-gpu { background: #8b5cf620; color: #a78bfa; }
-.md-typeset .badge-new { background: #ef444420; color: #f87171; }
+.md-typeset .badge-gpu  { background: #8b5cf620; color: #a78bfa; }
+.md-typeset .badge-new  { background: #ef444420; color: #f87171; }
 
-/* TTS comparison table — tighter */
+/* ── TTS table ── */
+
 .md-typeset .tts-table th,
 .md-typeset .tts-table td {
   padding: 0.5rem 0.75rem;
   white-space: nowrap;
 }
 
-/* Screenshot with subtle shadow */
+/* ── Screenshot ── */
+
 .md-typeset .screenshot {
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   margin: 1.5rem 0;
+}
+
+/* ── Light theme adjustments ── */
+
+[data-md-color-scheme="default"] .kv-hero-badge {
+  background: rgba(13, 148, 136, 0.08);
+  border-color: rgba(13, 148, 136, 0.3);
+  color: #0d9488;
+}
+
+[data-md-color-scheme="default"] .kv-hero-sub {
+  opacity: 0.65;
+}
+
+[data-md-color-scheme="default"] .kv-hero::before {
+  background:
+    radial-gradient(ellipse 600px 300px at 50% 0%, rgba(13, 148, 136, 0.06), transparent);
+}
+
+[data-md-color-scheme="default"] .kv-card {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.015);
+}
+
+[data-md-color-scheme="default"] .kv-card:hover {
+  border-color: rgba(13, 148, 136, 0.35);
+  background: rgba(13, 148, 136, 0.04);
+}
+
+[data-md-color-scheme="default"] .kv-section + .kv-section {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 600px) {
+  .kv-hero {
+    padding: 2.5rem 1rem 2rem;
+  }
+  .kv-grid {
+    grid-template-columns: 1fr;
+  }
 }

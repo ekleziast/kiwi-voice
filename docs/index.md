@@ -4,26 +4,28 @@ hide:
   - toc
 ---
 
-<div class="hero" markdown>
+<section class="kv-hero">
+  <div class="kv-hero-badge">Open Source Voice Interface</div>
+  <h1 class="kv-hero-title">Kiwi Voice</h1>
+  <p class="kv-hero-sub">
+    ML wake word detection, speaker identification, voice&#8209;gated security,
+    5&nbsp;TTS engines, 15&nbsp;languages, and a real&#8209;time web&nbsp;dashboard —
+    for&nbsp;your own AI&nbsp;stack.
+  </p>
+  <div class="kv-hero-actions">
+    <a href="getting-started/installation/" class="md-button md-button--primary">Get Started</a>
+    <a href="https://github.com/ekleziast/kiwi-voice" class="md-button">GitHub</a>
+  </div>
+</section>
 
-# Kiwi Voice
-
-**Open-source voice interface for AI agents** — ML wake word detection, speaker identification,
-voice-gated security, 5 TTS engines, 15 languages, and a real-time web dashboard.
-
-[Get Started](getting-started/installation.md){ .md-button .md-button--primary }
-[View on GitHub](https://github.com/ekleziast/kiwi-voice){ .md-button }
-
-</div>
-
----
+<section class="kv-section" markdown>
 
 ## How it works
 
-Kiwi Voice turns your [OpenClaw](https://github.com/openclaw/openclaw) agent into a hands-free assistant. It captures audio from your microphone (or directly from the browser), detects the wake word, transcribes speech locally, identifies *who* is speaking, enforces security policies based on voice, sends the command to any LLM through OpenClaw's WebSocket gateway, and speaks the response back — all in a continuous loop.
+Kiwi Voice turns your [OpenClaw](https://github.com/openclaw/openclaw) agent into a hands-free assistant. It captures audio from your microphone (or directly from the browser), detects the wake word, transcribes speech locally, identifies *who* is speaking, enforces security policies, sends the command to any LLM through OpenClaw's WebSocket gateway, and speaks the response back — all in a continuous loop.
 
 ```
-You: "Kiwi, turn on the lights in the bedroom"
+You:  "Kiwi, turn on the lights in the bedroom"
 
 Kiwi: [identifies speaker as Owner → full access]
       [sends to OpenClaw → routes to Home Assistant]
@@ -32,77 +34,64 @@ Kiwi: [identifies speaker as Owner → full access]
 
 Think Alexa or Siri, but self-hosted, privacy-first, and plugged into your own AI stack.
 
----
+</section>
 
-<div class="feature-grid" markdown>
+<section class="kv-section">
+  <h2>Features</h2>
+  <div class="kv-grid">
 
-<div class="feature-card" markdown>
+    <a class="kv-card" href="features/wake-word/">
+      <span class="kv-card-icon">🗣️</span>
+      <strong>Wake Word Detection</strong>
+      <span>Text fuzzy matching or <b>OpenWakeWord ML</b> — ONNX model, ~80ms latency, ~2% CPU. Built-in models or train your own.</span>
+    </a>
 
-### :material-microphone: Wake Word Detection
+    <a class="kv-card" href="features/speaker-id/">
+      <span class="kv-card-icon">🎭</span>
+      <strong>Speaker Identification</strong>
+      <span>Voiceprint recognition via pyannote embeddings. Priority hierarchy: Owner → Friend → Guest → Blocked.</span>
+    </a>
 
-Text-based fuzzy matching or **OpenWakeWord ML** — a small ONNX model that listens to raw audio with ~80ms latency and ~2% CPU. Built-in models: `hey_jarvis`, `alexa`, `hey_mycroft`. [Train your own →](features/wake-word.md)
+    <a class="kv-card" href="features/voice-security/">
+      <span class="kv-card-icon">🔐</span>
+      <strong>Two-Layer Security</strong>
+      <span>Pre-LLM dangerous command detector + post-LLM exec approval. Telegram notifications for non-owner actions.</span>
+    </a>
 
-</div>
+    <a class="kv-card" href="features/tts-providers/">
+      <span class="kv-card-icon">🔊</span>
+      <strong>5 TTS Providers</strong>
+      <span>ElevenLabs, Kokoro ONNX, Piper, Qwen3-TTS. Streaming sentence-aware chunking with barge-in support.</span>
+    </a>
 
-<div class="feature-card" markdown>
+    <a class="kv-card" href="features/web-dashboard/">
+      <span class="kv-card-icon">📊</span>
+      <strong>Web Dashboard & API</strong>
+      <span>Glassmorphism dark dashboard with live status, event log, personalities, speaker management, and browser mic.</span>
+    </a>
 
-### :material-account-voice: Speaker Identification
+    <a class="kv-card" href="features/home-assistant/">
+      <span class="kv-card-icon">🏠</span>
+      <strong>Home Assistant</strong>
+      <span>Bidirectional integration. Control Kiwi from HA dashboard, control your smart home by voice through Kiwi.</span>
+    </a>
 
-Voiceprint recognition via pyannote embeddings. Kiwi knows *who* is talking and enforces a priority hierarchy: Owner → Friend → Guest → Blocked. [Learn more →](features/speaker-id.md)
+    <a class="kv-card" href="features/multilanguage/">
+      <span class="kv-card-icon">🌍</span>
+      <strong>15 Languages</strong>
+      <span>Full i18n with YAML locales. All strings, voice commands, wake word variants, and security patterns per-language.</span>
+    </a>
 
-</div>
+    <a class="kv-card" href="features/souls/">
+      <span class="kv-card-icon">🎭</span>
+      <strong>Personality System</strong>
+      <span>5 built-in "souls" — switch by voice, API, or dashboard. NSFW routes to a separate isolated LLM session.</span>
+    </a>
 
-<div class="feature-card" markdown>
+  </div>
+</section>
 
-### :material-shield-lock: Two-Layer Security
-
-**Pre-LLM:** regex-based dangerous command detector across 15 languages + Telegram approval. **Post-LLM:** exec approval when the agent tries to run shell commands. [Details →](features/voice-security.md)
-
-</div>
-
-<div class="feature-card" markdown>
-
-### :material-volume-high: 5 TTS Providers
-
-ElevenLabs, Kokoro ONNX, Piper, Qwen3-TTS (local GPU or RunPod). Streaming sentence-aware chunking — starts speaking before the LLM finishes. [Compare →](features/tts-providers.md)
-
-</div>
-
-<div class="feature-card" markdown>
-
-### :material-web: Web Dashboard & API
-
-Real-time glassmorphism dashboard with live status, event log, personality carousel, speaker management, and browser microphone. 18 REST endpoints + WebSocket events. [Explore →](features/web-dashboard.md)
-
-</div>
-
-<div class="feature-card" markdown>
-
-### :material-home-automation: Home Assistant
-
-Bidirectional integration. Control Kiwi from HA dashboard, control your smart home by voice through Kiwi via the Conversation API. [Setup →](features/home-assistant.md)
-
-</div>
-
-<div class="feature-card" markdown>
-
-### :material-translate: 15 Languages
-
-Full i18n with YAML locale files. All user-facing strings, voice commands, wake word variants, hallucination filters, and security patterns are per-language. [Languages →](features/multilanguage.md)
-
-</div>
-
-<div class="feature-card" markdown>
-
-### :material-drama-masks: Personality System
-
-5 built-in "souls" — Mindful Companion, Storyteller, Comedian, Hype Person, Siren (18+). Switch by voice, API, or dashboard. NSFW routes to a separate LLM session. [Souls →](features/souls.md)
-
-</div>
-
-</div>
-
----
+<section class="kv-section" markdown>
 
 ## Quick Start
 
@@ -118,7 +107,9 @@ Open [http://localhost:7789](http://localhost:7789) for the web dashboard.
 
 [Full installation guide →](getting-started/installation.md)
 
----
+</section>
+
+<section class="kv-section" markdown>
 
 ## Architecture
 
@@ -135,3 +126,5 @@ Mic (24kHz) / Browser WebSocket → Audio Pipeline (Silero VAD + energy detectio
 ```
 
 [Architecture deep dive →](development/architecture.md)
+
+</section>
