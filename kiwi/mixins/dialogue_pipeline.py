@@ -303,6 +303,8 @@ class DialoguePipelineMixin:
         kiwi_log("KIWI", "Получена команда отмены!", level="INFO")
 
         tts_was_active = self.is_speaking() or self._is_streaming or self._streaming_tts_manager is not None
+        # Barge-in already stopped TTS before Whisper finished transcribing "stop"
+        barge_in_already_stopped = self._barge_in_requested and not tts_was_active
         openclaw_was_processing = self.openclaw.is_processing()
 
         if tts_was_active:
@@ -315,8 +317,9 @@ class DialoguePipelineMixin:
 
         cancelled = self.openclaw.cancel() if openclaw_was_processing else False
 
-        if tts_was_active:
+        if tts_was_active or barge_in_already_stopped:
             self._is_streaming = False
+            self._barge_in_requested = False
             self.listener.activate_dialog_mode()
             self._set_state(DialogueState.LISTENING)
             self._start_idle_timer()
