@@ -457,7 +457,8 @@ class KiwiListener:
         # === i18n: Load locale-aware constants (fallback to module-level defaults) ===
         self.wake_word = t("wake_word.keyword") or WAKE_WORD
         self.whisper_prompt = t("wake_word.whisper_prompt") or WHISPER_INITIAL_PROMPT
-        self.wake_word_typos = t("wake_word.typos") or WAKE_WORD_TYPOS
+        _typos = t("wake_word.typos")
+        self.wake_word_typos = _typos if isinstance(_typos, dict) else WAKE_WORD_TYPOS
         self.fuzzy_blacklist = set(t("wake_word.fuzzy_blacklist") or FUZZY_BLACKLIST)
         self.hallucination_phrases = set(t("hallucinations.phrases") or WHISPER_HALLUCINATION_PATTERNS)
         self.phantom_phrases = t("hallucinations.phantom_phrases") or PHANTOM_PHRASES
