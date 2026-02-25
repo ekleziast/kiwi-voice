@@ -480,6 +480,11 @@ class KiwiListener:
         _phantom_pat = t("hallucinations.phantom_patterns")
         self.phantom_patterns = _phantom_pat if isinstance(_phantom_pat, list) else PHANTOM_PATTERNS
 
+        _stop = t("commands.stop")
+        self._passive_stop_words = _stop if isinstance(_stop, list) else [
+            'стоп', 'отмена', 'хватит', 'прекрати', 'остановись', 'стой', 'cancel', 'stop'
+        ]
+
         self.detector = WakeWordDetector(
             wake_word=self.wake_word,
             position_limit=self.config.position_limit,
@@ -624,7 +629,15 @@ class KiwiListener:
         self._last_tts_text = ""            # Last text spoken by Kiwi (for anti-echo)
         self._last_tts_time = 0.0           # End time of last TTS
         self._tts_echo_window = 15.0        # Anti-echo check window (seconds after TTS)
-        
+
+        # === PASSIVE LISTENING: Transcribe during TTS for stop commands ===
+        self._passive_buffer: list = []         # Audio chunks captured during TTS
+        self._passive_is_speaking = False       # Voice activity detected in passive mode
+        self._passive_silence_counter = 0       # Silence chunks since last voice activity
+        self._passive_silence_needed = 3        # Chunks of silence to trigger transcription (~0.9s)
+        self._passive_min_chunks = 2            # Minimum speech chunks before transcribing
+        self._passive_stop_words: list = []     # Loaded from i18n at init
+
         # === DEBOUNCING AND QUEUE CONTROL ===
         self._last_submit_time = 0.0        # Time of last submit
         self._submit_debounce = 0.5         # Minimum 500ms between submits
@@ -1133,6 +1146,56 @@ class KiwiListener:
 
         return False
 
+    def _passive_transcribe_for_stop(self, audio_chunks: list) -> bool:
+        """Quickly transcribe audio captured during TTS and check for stop commands.
+
+        Returns True if a stop command was detected (and barge-in requested).
+        """
+        if not audio_chunks or self.model is None:
+            return False
+
+        try:
+            audio = np.concatenate(audio_chunks)
+            duration = len(audio) / self.config.sample_rate
+            if duration < 0.3:
+                return False
+
+            segments, _info = self.model.transcribe(
+                audio,
+                language="ru",
+                task="transcribe",
+                beam_size=1,
+                best_of=1,
+                condition_on_previous_text=False,
+                initial_prompt=self.whisper_prompt,
+                no_speech_threshold=0.85,
+            )
+
+            text_parts = []
+            for seg in segments:
+                if getattr(seg, 'no_speech_prob', 0.0) > 0.85:
+                    continue
+                if getattr(seg, 'avg_logprob', 0.0) < -1.0:
+                    continue
+                text_parts.append(seg.text)
+
+            text = " ".join(text_parts).strip().lower()
+            if not text:
+                return False
+
+            kiwi_log("PASSIVE", f"Heard during TTS: '{text}'")
+
+            for word in self._passive_stop_words:
+                if word in text:
+                    kiwi_log("PASSIVE", f"Stop command detected: '{word}' in '{text}'")
+                    self._request_barge_in()
+                    return True
+
+        except Exception as e:
+            kiwi_log("PASSIVE", f"Transcription error: {e}", level="ERROR")
+
+        return False
+
     def load_model(self):
         """Loads the Whisper model."""
         log_func = kiwi_log if UTILS_AVAILABLE else lambda tag, msg: print(f"[{tag}] {msg}", flush=True)
@@ -1624,14 +1687,45 @@ class KiwiListener:
                 else:
                     self._barge_in_window.clear()
                 
-                # Reset speech state -- audio recording for Whisper is not active
+                # Reset normal speech state -- normal Whisper recording is not active
                 if is_speaking:
                     kiwi_log("MIC", "Speech recording stopped — Kiwi is speaking (echo protection)")
                     audio_buffer = []
                     is_speaking = False
                     silence_counter = 0
                     speech_start_time = None
-                return  # EXIT, do not record audio
+
+                # === PASSIVE LISTENING: Record audio during TTS for stop commands ===
+                barge_in_threshold = max(
+                    self._silence_threshold * self._barge_in_volume_multiplier,
+                    self._barge_in_min_volume
+                )
+                if is_sound and volume > barge_in_threshold:
+                    self._passive_buffer.append(audio_chunk)
+                    self._passive_is_speaking = True
+                    self._passive_silence_counter = 0
+                elif self._passive_is_speaking:
+                    self._passive_silence_counter += 1
+                    self._passive_buffer.append(audio_chunk)
+                    if self._passive_silence_counter >= self._passive_silence_needed:
+                        # Silence detected — transcribe passive buffer for stop commands
+                        if len(self._passive_buffer) >= self._passive_min_chunks:
+                            buf = self._passive_buffer.copy()
+                            self._passive_buffer.clear()
+                            self._passive_is_speaking = False
+                            self._passive_silence_counter = 0
+                            # Run transcription in a separate thread to not block audio callback
+                            threading.Thread(
+                                target=self._passive_transcribe_for_stop,
+                                args=(buf,),
+                                daemon=True,
+                            ).start()
+                        else:
+                            self._passive_buffer.clear()
+                            self._passive_is_speaking = False
+                            self._passive_silence_counter = 0
+
+                return  # EXIT, do not record audio for normal processing
             
             # =================================================================
             # =================================================================
@@ -1664,6 +1758,12 @@ class KiwiListener:
             # NORMAL MODE: Kiwi is NOT speaking -- normal speech recording
             # =================================================================
             self._barge_in_counter = 0  # Reset barge-in (not needed when Kiwi is silent)
+
+            # Clean up passive listening state from TTS phase
+            if self._passive_buffer:
+                self._passive_buffer.clear()
+                self._passive_is_speaking = False
+                self._passive_silence_counter = 0
 
             # Publish VAD events to event bus
             if EVENT_BUS_AVAILABLE:
