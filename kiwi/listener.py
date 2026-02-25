@@ -106,6 +106,14 @@ except ImportError:
     VOICE_SECURITY_AVAILABLE = False
     kiwi_log("LISTENER", "Voice Security not available")
 
+# OpenWakeWord (ML-based wake word detection)
+try:
+    from kiwi.wake_word import OpenWakeWordDetector
+    OPENWAKEWORD_AVAILABLE = True
+except ImportError:
+    OPENWAKEWORD_AVAILABLE = False
+    kiwi_log("LISTENER", "OpenWakeWord not available — using text-based detection")
+
 # i18n support
 from kiwi.i18n import t
 
@@ -362,6 +370,10 @@ class ListenerConfig:
     max_speech_duration: float = MAX_SPEECH_DURATION
     silence_duration_end: float = SILENCE_DURATION_END
     min_speech_volume: float = MIN_SPEECH_VOLUME
+    # Wake word engine: "text" (fuzzy match) | "openwakeword" (ML model)
+    wake_word_engine: str = "text"
+    wake_word_model: str = "hey_jarvis"
+    wake_word_threshold: float = 0.5
 
 
 class WakeWordDetector:
@@ -473,6 +485,28 @@ class KiwiListener:
             position_limit=self.config.position_limit,
             fuzzy_blacklist=self.fuzzy_blacklist,
         )
+
+        # === OPENWAKEWORD: ML-based wake word detection ===
+        self._oww_detector = None
+        self._oww_enabled = False
+        if self.config.wake_word_engine == "openwakeword" and OPENWAKEWORD_AVAILABLE:
+            try:
+                self._oww_detector = OpenWakeWordDetector(
+                    model=self.config.wake_word_model,
+                    threshold=self.config.wake_word_threshold,
+                )
+                if self._oww_detector.load():
+                    self._oww_enabled = True
+                    kiwi_log("OWW", f"OpenWakeWord enabled: model={self.config.wake_word_model}, "
+                             f"threshold={self.config.wake_word_threshold}")
+                else:
+                    kiwi_log("OWW", "OpenWakeWord load failed, falling back to text detection", level="WARNING")
+                    self._oww_detector = None
+            except Exception as e:
+                kiwi_log("OWW", f"OpenWakeWord init failed: {e}, using text detection", level="WARNING")
+                self._oww_detector = None
+        elif self.config.wake_word_engine == "openwakeword" and not OPENWAKEWORD_AVAILABLE:
+            kiwi_log("OWW", "openwakeword not installed (pip install openwakeword), using text detection", level="WARNING")
 
         self.audio_queue: queue.Queue = queue.Queue()
         self.is_running = False
@@ -1090,7 +1124,10 @@ class KiwiListener:
         overlap = text_meaningful & tts_words
         ratio = len(overlap) / len(text_meaningful)
 
-        if ratio >= 0.5:
+        # Short phrases (≤3 meaningful words) need higher overlap to avoid false positives
+        threshold = 0.75 if len(text_meaningful) <= 3 else 0.5
+
+        if ratio >= threshold:
             kiwi_log("TTS-ECHO", f"Filtered echo: '{text}' (overlap={ratio:.0%}, words={overlap})")
             return True
 
@@ -1466,10 +1503,35 @@ class KiwiListener:
             
             audio_chunk = indata[:, 0].copy()
             volume = np.abs(audio_chunk).mean()
-            
+
             # === PRE-BUFFER: Always save audio (even when quiet) ===
             pre_buffer.append(audio_chunk)
-            
+
+            # === OPENWAKEWORD: ML-based wake word detection on raw audio ===
+            # Runs on every chunk (~80ms) with minimal CPU overhead.
+            # When triggered, activates dialog mode as if text-based wake word detected.
+            if self._oww_enabled and self._oww_detector is not None:
+                if not is_speaking and not self.dialog_mode and not self._is_kiwi_speaking():
+                    # Convert float32 [-1,1] to int16 for OpenWakeWord
+                    oww_chunk = (audio_chunk * 32767).astype(np.int16)
+                    if self._oww_detector.process_chunk(oww_chunk):
+                        kiwi_log("OWW", "Wake word detected via OpenWakeWord!")
+                        # Publish event
+                        if EVENT_BUS_AVAILABLE:
+                            get_event_bus().publish(
+                                EventType.WAKE_WORD_DETECTED,
+                                {'source': 'openwakeword', 'volume': volume},
+                                source='listener',
+                            )
+                        # Activate dialog mode (same as text-based wake word)
+                        self.activate_dialog_mode()
+                        if self.on_wake_word:
+                            try:
+                                self.on_wake_word(None)
+                            except Exception as e:
+                                kiwi_log("OWW", f"on_wake_word callback error: {e}", level="ERROR")
+                        return
+
             # === DEBUG: Show sound level every 30 chunks (~10s) ===
             self._debug_counter = getattr(self, '_debug_counter', 0) + 1
             if self._debug_counter % 30 == 0:
