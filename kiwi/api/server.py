@@ -35,6 +35,12 @@ try:
 except ImportError:
     SPEAKER_MANAGER_AVAILABLE = False
 
+try:
+    from kiwi.api.audio_bridge import WebAudioBridge
+    AUDIO_BRIDGE_AVAILABLE = True
+except ImportError:
+    AUDIO_BRIDGE_AVAILABLE = False
+
 
 def _json_response(data: Any, status: int = 200) -> "web.Response":
     """Create a JSON response with proper content type."""
@@ -73,6 +79,7 @@ class KiwiAPI:
         self._ws_clients: list = []  # Active WebSocket connections
         self._start_time: float = time.time()
         self._event_sub_ids: list = []  # EventBus subscription IDs
+        self.audio_bridge: Optional["WebAudioBridge"] = None
 
     def start(self):
         """Start the API server in a background thread."""
@@ -108,6 +115,13 @@ class KiwiAPI:
     async def _start_server(self):
         """Initialize and start the aiohttp application."""
         self._app = web.Application()
+
+        # Initialize WebAudio bridge if enabled
+        web_audio_enabled = getattr(self.service.config, "web_audio_enabled", True)
+        if web_audio_enabled and AUDIO_BRIDGE_AVAILABLE and self._loop:
+            self.audio_bridge = WebAudioBridge(self.service, self._loop)
+            kiwi_log("API", "WebAudio bridge initialized", level="INFO")
+
         self._setup_routes()
         self._setup_event_forwarding()
         self._runner = web.AppRunner(self._app)
@@ -137,6 +151,9 @@ class KiwiAPI:
         router.add_post("/api/restart", self._handle_restart)
         router.add_post("/api/shutdown", self._handle_shutdown)
         router.add_get("/api/events", self._handle_ws_events)
+        # WebAudio bridge
+        if self.audio_bridge:
+            router.add_get("/api/audio", self.audio_bridge.handle_audio_ws)
         # Home Assistant integration
         router.add_get("/api/homeassistant/status", self._handle_ha_status)
         router.add_post("/api/homeassistant/command", self._handle_ha_command)
@@ -245,6 +262,7 @@ class KiwiAPI:
                 "active_speaker": active_speaker,
                 "active_soul": active_soul,
                 "homeassistant_connected": ha_connected,
+                "web_audio_clients": self.audio_bridge.client_count if self.audio_bridge else 0,
             }
             return _json_response(data)
         except Exception as e:

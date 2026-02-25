@@ -365,6 +365,10 @@ class TTSSpeechMixin:
                 level="INFO",
             )
 
+            # Send TTS chunk to web audio clients
+            if hasattr(self, "_send_to_web_audio"):
+                self._send_to_web_audio(audio, sample_rate)
+
             self._is_speaking = True
             self._barge_in_requested = False
             if hasattr(self, "listener") and self.listener:

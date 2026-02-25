@@ -916,3 +916,85 @@ function showToast(message, type = 'info', duration = 3000) {
         });
     }, duration);
 }
+
+// ============================================================
+// Web Microphone (AudioWorklet + WebSocket)
+// ============================================================
+
+let _audioClient = null;
+
+function toggleMicrophone() {
+    if (_audioClient && _audioClient.isConnected) {
+        _audioClient.disconnect();
+        return;
+    }
+
+    _audioClient = new KiwiAudioClient({
+        onStateChange(state) {
+            const btn = document.getElementById('mic-btn');
+            const label = document.getElementById('mic-state');
+            btn.classList.remove('active', 'error');
+
+            if (state === 'connected') {
+                btn.classList.add('active');
+                label.textContent = 'Connected — listening';
+                showToast('Microphone connected', 'success');
+            } else if (state === 'connecting') {
+                label.textContent = 'Connecting...';
+            } else if (state === 'error') {
+                btn.classList.add('error');
+                label.textContent = 'Error — click to retry';
+            } else {
+                label.textContent = 'Click to connect';
+                updateVolumeBars(0);
+            }
+        },
+        onVolume(level) {
+            updateVolumeBars(level);
+        },
+        onError(msg) {
+            showToast('Mic: ' + msg, 'error');
+        },
+        onTtsStart() {
+            document.getElementById('mic-state').textContent = 'Playing TTS...';
+        },
+        onTtsEnd() {
+            if (_audioClient && _audioClient.isConnected) {
+                document.getElementById('mic-state').textContent = 'Connected — listening';
+            }
+        },
+    });
+
+    _audioClient.connect();
+}
+
+/**
+ * Update the 5 volume bar indicators based on audio level (0-1).
+ */
+function updateVolumeBars(level) {
+    const bars = document.querySelectorAll('#volume-bars .vol-bar');
+    const count = bars.length;
+    const scaled = Math.min(level * 3, 1);  // amplify for visual feedback
+    const activeBars = Math.round(scaled * count);
+
+    for (let i = 0; i < count; i++) {
+        if (i < activeBars) {
+            bars[i].classList.add('active');
+            bars[i].style.height = (4 + (i + 1) * 3) + 'px';
+        } else {
+            bars[i].classList.remove('active');
+            bars[i].style.height = '4px';
+        }
+    }
+}
+
+/**
+ * Scroll the souls carousel left or right.
+ * @param {number} direction — -1 for left, 1 for right
+ */
+function scrollSouls(direction) {
+    const carousel = document.getElementById('souls-grid');
+    if (!carousel) return;
+    const scrollAmount = 260;
+    carousel.scrollBy({ left: direction * scrollAmount, behavior: 'smooth' });
+}

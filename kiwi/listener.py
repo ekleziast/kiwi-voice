@@ -2116,7 +2116,44 @@ class KiwiListener:
         }
 
         self.audio_queue.put((audio, meta))
-    
+
+    def submit_external_audio(self, audio: np.ndarray, meta: dict = None):
+        """Submit pre-processed audio from an external source (e.g. web browser).
+
+        Bypasses microphone-specific processing (energy gate, noise reduction,
+        speaker ID) and feeds directly into the transcription queue.
+        """
+        if audio is None or len(audio) == 0:
+            return
+
+        duration = len(audio) / self.config.sample_rate
+
+        # Resample if needed (external source may use different rate)
+        source_rate = (meta or {}).get("sample_rate", self.config.sample_rate)
+        if source_rate != self.config.sample_rate:
+            try:
+                import scipy.signal
+                num_samples = int(len(audio) * self.config.sample_rate / source_rate)
+                audio = scipy.signal.resample(audio, num_samples).astype(np.float32)
+                duration = len(audio) / self.config.sample_rate
+            except ImportError:
+                kiwi_log("WEB_AUDIO", "scipy not available for resampling", level="WARNING")
+
+        default_meta = {
+            "speaker_id": "web",
+            "speaker_name": "Web User",
+            "priority": int(VoicePriority.GUEST) if SPEAKER_MANAGER_AVAILABLE else 2,
+            "confidence": 0.0,
+            "music_probability": 0.0,
+            "timestamp": time.time(),
+            "source": "web",
+        }
+        if meta:
+            default_meta.update(meta)
+
+        kiwi_log("WEB_AUDIO", f"External audio submitted: {duration:.1f}s", level="INFO")
+        self.audio_queue.put((audio, default_meta))
+
     # === VOICE PRIORITY QUEUE METHODS ===
     
     def identify_speaker_fast(self, audio: np.ndarray) -> Tuple[str, int, float, str]:

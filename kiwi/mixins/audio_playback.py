@@ -202,6 +202,10 @@ class AudioPlaybackMixin:
                 except Exception:
                     pass
 
+            # Send TTS audio to web clients
+            self._notify_web_audio("tts_start", {"duration": len(audio) / sample_rate})
+            self._send_to_web_audio(audio, sample_rate)
+
             self._is_speaking = True
             self._barge_in_requested = False
 
@@ -233,6 +237,7 @@ class AudioPlaybackMixin:
                 sd.wait()
 
             kiwi_log("TTS", "Playback finished" + (" (interrupted)" if interrupted_by_barge_in else ""), level="INFO")
+            self._notify_web_audio("tts_end")
 
             self._is_speaking = False
             self.listener._tts_start_time = time.time()
@@ -302,6 +307,25 @@ class AudioPlaybackMixin:
                 self.listener._tts_start_time = time.time()
             if self._task_status_announcer:
                 self._task_status_announcer.on_tts_playing(False)
+
+    def _get_web_audio_bridge(self):
+        """Return the WebAudioBridge instance if available and has clients."""
+        api = getattr(self, "_api", None)
+        if api and hasattr(api, "audio_bridge") and api.audio_bridge:
+            return api.audio_bridge
+        return None
+
+    def _send_to_web_audio(self, audio: np.ndarray, sample_rate: int):
+        """Send TTS audio to connected web audio clients."""
+        bridge = self._get_web_audio_bridge()
+        if bridge and bridge.has_clients():
+            bridge.send_tts_audio(audio, sample_rate)
+
+    def _notify_web_audio(self, msg_type: str, data: dict = None):
+        """Send a control message to web audio clients."""
+        bridge = self._get_web_audio_bridge()
+        if bridge and bridge.has_clients():
+            bridge.send_control_sync(msg_type, data)
 
     def _clear_audio_queue(self):
         """Drain the audio queue."""

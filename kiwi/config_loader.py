@@ -147,6 +147,11 @@ class KiwiConfig:
     api_host: str = "0.0.0.0"
     api_port: int = 7789
 
+    # Web Audio (browser microphone via WebSocket)
+    web_audio_enabled: bool = True
+    web_audio_sample_rate: int = 16000
+    web_audio_max_clients: int = 3
+
     # Home Assistant integration
     ha_enabled: bool = False
     ha_url: str = ""
@@ -384,6 +389,21 @@ class KiwiConfig:
             config.api_host = os.getenv("KIWI_API_HOST").strip()
         if os.getenv("KIWI_API_PORT"):
             config.api_port = int(os.getenv("KIWI_API_PORT"))
+
+        # Web Audio settings
+        web_audio_cfg = yaml_config.get("web_audio", {})
+        if isinstance(web_audio_cfg, dict):
+            raw_wa_enabled = web_audio_cfg.get("enabled", config.web_audio_enabled)
+            if isinstance(raw_wa_enabled, str):
+                config.web_audio_enabled = raw_wa_enabled.strip().lower() in ("true", "1", "yes")
+            else:
+                config.web_audio_enabled = bool(raw_wa_enabled)
+            config.web_audio_sample_rate = int(web_audio_cfg.get("sample_rate", config.web_audio_sample_rate))
+            config.web_audio_max_clients = int(web_audio_cfg.get("max_clients", config.web_audio_max_clients))
+
+        # Env var overrides for Web Audio
+        if os.getenv("KIWI_WEB_AUDIO_ENABLED"):
+            config.web_audio_enabled = os.getenv("KIWI_WEB_AUDIO_ENABLED").strip().lower() in ("true", "1", "yes")
 
         # Home Assistant integration
         ha_cfg = yaml_config.get("homeassistant", {})

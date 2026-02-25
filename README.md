@@ -42,6 +42,8 @@ Think of it as Alexa/Siri, but self-hosted, privacy-first, and plugged into your
 | 🔌 **WebSocket** | Native OpenClaw Gateway v3 protocol with delta/final streaming |
 | 🌍 **Multi-Language** | Built-in i18n with YAML locale files — switch language with a single config field |
 | 🍎 **MLX Whisper** | Optional Apple Silicon optimized STT via Lightning Whisper MLX (~10x faster on M-series) |
+| 🌐 **Web Dashboard** | Real-time glassmorphism dashboard with live status, event log, controls, and personality switching |
+| 🎙️ **Web Microphone** | Talk to Kiwi from any browser — WebSocket audio streaming with AudioWorklet, no local mic setup needed |
 
 ## Architecture
 
@@ -300,18 +302,20 @@ Kiwi includes a built-in REST API and a real-time web dashboard.
 http://localhost:7789/
 ```
 
-<!-- TODO: add screenshot — save as docs/dashboard.png -->
-<!-- ![Dashboard](docs/dashboard.png) -->
+<p align="center">
+  <img src="docs/dashboard.png" width="720" alt="Kiwi Voice Dashboard">
+</p>
 
 **Dashboard features:**
 - **Live state orb** — animated indicator that changes color and pulse speed with assistant state (idle / listening / thinking / speaking)
 - **Real-time event log** — terminal-style feed of all system events via WebSocket
-- **Personality cards** — bank-card styled soul switcher with holographic accents; click to activate, NSFW souls highlighted in ruby
+- **Personality cards** — horizontal carousel with holographic accents; click to activate, NSFW souls highlighted in ruby
 - **Speaker management** — table with voiceprint priority badges, block/unblock/delete actions
 - **Controls** — stop playback, reset context, restart/shutdown, TTS test
 - **Language switcher** — change locale on the fly
+- **Web Microphone** — talk to Kiwi directly from the browser via WebSocket audio streaming
 
-**API endpoints:** `/api/status`, `/api/config`, `/api/speakers`, `/api/languages`, `/api/souls`, `/api/soul`, `/api/tts/test`, `/api/stop`, `/api/reset-context`, `/api/restart`, `/api/shutdown`, plus WebSocket `/api/events` for real-time streaming.
+**API endpoints:** `/api/status`, `/api/config`, `/api/speakers`, `/api/languages`, `/api/souls`, `/api/soul`, `/api/tts/test`, `/api/stop`, `/api/reset-context`, `/api/restart`, `/api/shutdown`, `/api/audio` (WebSocket for browser mic), plus `/api/events` for real-time event streaming.
 
 Configure in `config.yaml`:
 ```yaml
@@ -319,6 +323,26 @@ api:
   enabled: true
   host: "0.0.0.0"
   port: 7789
+```
+
+## Web Audio Streaming
+
+The dashboard includes a **Web Microphone** that lets you talk to Kiwi directly from the browser — no local microphone setup or pyaudio installation needed.
+
+**How it works:**
+- Browser captures audio via AudioWorklet (low-latency, runs off main thread)
+- PCM Int16 audio is streamed to Kiwi over a WebSocket (`/api/audio`)
+- Kiwi processes it through the same STT → wake word → LLM → TTS pipeline
+- TTS responses are streamed back to the browser and played via AudioWorklet
+
+Click the microphone button in the dashboard to connect. Volume bars show live audio level.
+
+Configure in `config.yaml`:
+```yaml
+web_audio:
+  enabled: true
+  sample_rate: 16000
+  max_clients: 3
 ```
 
 ## Home Assistant Integration

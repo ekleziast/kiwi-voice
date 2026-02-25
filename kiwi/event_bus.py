@@ -72,6 +72,10 @@ class EventType(Enum):
     EXEC_APPROVAL_REQUESTED = auto()
     EXEC_APPROVAL_RESOLVED = auto()
 
+    # Web Audio
+    WEB_CLIENT_CONNECTED = auto()
+    WEB_CLIENT_DISCONNECTED = auto()
+
     # System
     SYSTEM_STARTUP = auto()
     SYSTEM_SHUTDOWN = auto()
