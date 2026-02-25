@@ -1,0 +1,9 @@
+[lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # line length handled by formatter
+
+[lint.per-file-ignores]
+"tests/*" = ["E402"]  # allow sys.path manipulation before imports
+
+[format]
+line-length = 120
