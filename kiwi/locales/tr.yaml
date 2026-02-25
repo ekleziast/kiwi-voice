@@ -59,6 +59,10 @@ responses:
   ha_not_configured: "Akıllı ev entegrasyonu yapılandırılmamış."
   ha_connection_error: "Akıllı eve bağlanılamıyor."
   ha_no_response: "Akıllı ev yanıt vermedi."
+  exec_approval_request: "Ajan bir komut çalıştırmak istiyor: {command}. İzin vereyim mi?"
+  exec_approved: "Onaylandı. Komut çalıştırılıyor."
+  exec_denied: "Reddedildi. Komut engellendi."
+  exec_timeout: "Yanıt yok. Komut güvenlik için reddedildi."
 
 # Status announcer fallback messages
 status:

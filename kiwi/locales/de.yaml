@@ -59,6 +59,10 @@ responses:
   ha_not_configured: "Die Smart-Home-Integration ist nicht konfiguriert."
   ha_connection_error: "Kann keine Verbindung zum Smart Home herstellen."
   ha_no_response: "Das Smart Home hat nicht geantwortet."
+  exec_approval_request: "Der Agent möchte einen Befehl ausführen: {command}. Soll ich erlauben?"
+  exec_approved: "Genehmigt. Befehl wird ausgeführt."
+  exec_denied: "Abgelehnt. Befehl blockiert."
+  exec_timeout: "Keine Antwort. Befehl aus Sicherheitsgründen abgelehnt."
 
 # Status announcer fallback messages
 status:

@@ -59,6 +59,10 @@ responses:
   ha_not_configured: "L'intégration maison connectée n'est pas configurée."
   ha_connection_error: "Impossible de se connecter à la maison connectée."
   ha_no_response: "La maison connectée n'a pas répondu."
+  exec_approval_request: "L'agent veut exécuter une commande : {command}. Dois-je autoriser ?"
+  exec_approved: "Approuvé. Exécution de la commande."
+  exec_denied: "Refusé. Commande bloquée."
+  exec_timeout: "Pas de réponse. Commande refusée par sécurité."
 
 # Status announcer fallback messages
 status:

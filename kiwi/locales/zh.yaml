@@ -59,6 +59,10 @@ responses:
   ha_not_configured: "智能家居集成未配置。"
   ha_connection_error: "无法连接到智能家居。"
   ha_no_response: "智能家居没有响应。"
+  exec_approval_request: "代理想要执行命令：{command}。是否允许？"
+  exec_approved: "已批准。正在执行命令。"
+  exec_denied: "已拒绝。命令已被阻止。"
+  exec_timeout: "无响应。出于安全考虑，命令已被拒绝。"
 
 # Status announcer fallback messages
 status:

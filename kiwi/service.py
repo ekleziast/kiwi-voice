@@ -191,6 +191,7 @@ class KiwiServiceOpenClaw(
         self._owner_name = getattr(self.config, "owner_name", "Owner")
         self._owner_approval_timeout = 120.0
         self._pending_owner_approval: Optional[dict] = None
+        self._pending_exec_approval: Optional[dict] = None  # OpenClaw exec approval
         self._owner_profile_warning_shown = False
 
         self._self_profile_created = False
@@ -408,6 +409,7 @@ class KiwiServiceOpenClaw(
                     on_activity=self._on_agent_activity,
                     on_resume=self._on_llm_resume,
                     on_wave_end=self._on_wave_end,
+                    on_exec_approval=self._on_exec_approval_request,
                     log_func=kiwi_log if UTILS_AVAILABLE else print,
                 )
                 if ws_client.connect():

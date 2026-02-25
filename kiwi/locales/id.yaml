@@ -59,6 +59,10 @@ responses:
   ha_not_configured: "Integrasi rumah pintar belum dikonfigurasi."
   ha_connection_error: "Tidak bisa terhubung ke rumah pintar."
   ha_no_response: "Rumah pintar tidak merespons."
+  exec_approval_request: "Agen ingin menjalankan perintah: {command}. Bolehkah saya mengizinkan?"
+  exec_approved: "Disetujui. Menjalankan perintah."
+  exec_denied: "Ditolak. Perintah diblokir."
+  exec_timeout: "Tidak ada respons. Perintah ditolak demi keamanan."
 
 # Status announcer fallback messages
 status:

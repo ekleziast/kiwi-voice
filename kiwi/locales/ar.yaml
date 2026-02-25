@@ -59,6 +59,10 @@ responses:
   ha_not_configured: "تكامل المنزل الذكي غير مُعدّ."
   ha_connection_error: "لا أستطيع الاتصال بالمنزل الذكي."
   ha_no_response: "المنزل الذكي لم يستجب."
+  exec_approval_request: "يريد الوكيل تنفيذ أمر: {command}. هل أسمح؟"
+  exec_approved: "تمت الموافقة. جاري تنفيذ الأمر."
+  exec_denied: "مرفوض. تم حظر الأمر."
+  exec_timeout: "لا استجابة. تم رفض الأمر للأمان."
 
 # Status announcer fallback messages
 status:

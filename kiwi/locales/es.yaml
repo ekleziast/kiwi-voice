@@ -59,6 +59,10 @@ responses:
   ha_not_configured: "La integración con el hogar inteligente no está configurada."
   ha_connection_error: "No puedo conectarme al hogar inteligente."
   ha_no_response: "El hogar inteligente no respondió."
+  exec_approval_request: "El agente quiere ejecutar un comando: {command}. ¿Lo permito?"
+  exec_approved: "Aprobado. Ejecutando el comando."
+  exec_denied: "Denegado. Comando bloqueado."
+  exec_timeout: "Sin respuesta. Comando denegado por seguridad."
 
 # Status announcer fallback messages
 status:

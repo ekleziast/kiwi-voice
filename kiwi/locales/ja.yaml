@@ -59,6 +59,10 @@ responses:
   ha_not_configured: "スマートホーム連携が設定されていません。"
   ha_connection_error: "スマートホームに接続できません。"
   ha_no_response: "スマートホームから応答がありません。"
+  exec_approval_request: "エージェントがコマンドを実行しようとしています：{command}。許可しますか？"
+  exec_approved: "承認しました。コマンドを実行します。"
+  exec_denied: "拒否しました。コマンドをブロックしました。"
+  exec_timeout: "応答がありません。安全のためコマンドを拒否しました。"
 
 # Status announcer fallback messages
 status:

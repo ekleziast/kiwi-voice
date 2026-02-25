@@ -1,6 +1,7 @@
-"""LLM callback mixin — token, activity, and completion handlers."""
+"""LLM callback mixin — token, activity, completion, and exec approval handlers."""
 
 import time
+import threading
 
 from kiwi.state_machine import DialogueState
 from kiwi.utils import kiwi_log
@@ -157,3 +158,110 @@ class LLMCallbacksMixin:
 
         if not self._barge_in_requested:
             self._start_idle_timer()
+
+    # ------------------------------------------------------------------
+    # Exec approval: OpenClaw asks for permission to run a shell command
+    # ------------------------------------------------------------------
+
+    def _on_exec_approval_request(self, data: dict):
+        """Called from WebSocket thread when OpenClaw requests exec approval.
+
+        Pauses TTS, announces the command to the owner, and waits for
+        voice confirmation or Telegram approval. If no response within
+        the timeout, the approval is denied.
+        """
+        approval_id = data.get("id", "")
+        command = data.get("command", "")
+        expires_at_ms = data.get("expires_at_ms", 0)
+
+        kiwi_log("EXEC-APPROVAL", f"OpenClaw requests approval: '{command[:100]}'", level="INFO")
+
+        # Store pending approval
+        self._pending_exec_approval = {
+            "id": approval_id,
+            "command": command,
+            "timestamp": time.time(),
+            "expires_at_ms": expires_at_ms,
+        }
+
+        # Announce to owner via voice
+        announce = t("responses.exec_approval_request")
+        if not announce or announce == "responses.exec_approval_request":
+            announce = "OpenClaw wants to run a command: {command}. Should I allow it?"
+        self.speak(announce.format(command=command[:100]) if "{command}" in announce else f"{announce} {command[:100]}", style="neutral")
+
+        # Also send via Telegram if configured
+        voice_security = getattr(self, '_voice_security', None)
+        if voice_security and voice_security.telegram.is_configured():
+            voice_security.telegram.send_approval_request(
+                command=f"[exec] {command}",
+                speaker_id="openclaw-agent",
+                speaker_name="OpenClaw Agent",
+                callback=self._on_exec_telegram_decision,
+            )
+            kiwi_log("EXEC-APPROVAL", "Telegram approval request sent", level="INFO")
+
+        # Activate dialog mode to listen for voice response
+        self.listener.activate_dialog_mode()
+
+        # Start timeout timer — deny if no response
+        timeout_s = 55.0  # OpenClaw default is 60s, leave 5s margin
+        if expires_at_ms:
+            remaining = (expires_at_ms / 1000.0) - time.time()
+            if remaining > 5:
+                timeout_s = remaining - 5  # 5s margin
+
+        timer = threading.Timer(timeout_s, self._exec_approval_timeout, args=[approval_id])
+        timer.daemon = True
+        timer.start()
+
+    def _on_exec_telegram_decision(self, approved, approval_data):
+        """Called from Telegram polling thread when owner approves/denies exec."""
+        if not self._pending_exec_approval:
+            return
+
+        approval_id = self._pending_exec_approval["id"]
+        self._pending_exec_approval = None
+
+        decision = "allow-once" if approved else "deny"
+        self.openclaw.resolve_exec_approval(approval_id, decision)
+
+        if approved:
+            self.speak(t("responses.exec_approved") or "Approved. Running the command.", style="confident")
+        else:
+            self.speak(t("responses.exec_denied") or "Denied. Command blocked.", style="calm")
+
+    def _exec_approval_timeout(self, approval_id: str):
+        """Auto-deny if no response within the timeout."""
+        if not self._pending_exec_approval:
+            return
+        if self._pending_exec_approval.get("id") != approval_id:
+            return
+
+        kiwi_log("EXEC-APPROVAL", f"Timeout — auto-denying {approval_id[:12]}", level="WARNING")
+        self._pending_exec_approval = None
+        self.openclaw.resolve_exec_approval(approval_id, "deny")
+        self.speak(t("responses.exec_timeout") or "No response. Command denied.", style="calm")
+
+    def resolve_pending_exec_approval(self, approved: bool) -> bool:
+        """Resolve pending exec approval from voice command.
+
+        Called from dialogue pipeline when owner says "allow" / "deny".
+
+        Returns:
+            True if there was a pending approval to resolve
+        """
+        if not self._pending_exec_approval:
+            return False
+
+        approval_id = self._pending_exec_approval["id"]
+        self._pending_exec_approval = None
+
+        decision = "allow-once" if approved else "deny"
+        self.openclaw.resolve_exec_approval(approval_id, decision)
+
+        if approved:
+            self.speak(t("responses.exec_approved") or "Approved. Running the command.", style="confident")
+        else:
+            self.speak(t("responses.exec_denied") or "Denied. Command blocked.", style="calm")
+        return True

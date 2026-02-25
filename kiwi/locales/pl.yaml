@@ -59,6 +59,10 @@ responses:
   ha_not_configured: "Integracja z inteligentnym domem nie jest skonfigurowana."
   ha_connection_error: "Nie mogę połączyć się z inteligentnym domem."
   ha_no_response: "Inteligentny dom nie odpowiedział."
+  exec_approval_request: "Agent chce wykonać polecenie: {command}. Czy pozwolić?"
+  exec_approved: "Zatwierdzone. Wykonuję polecenie."
+  exec_denied: "Odmowa. Polecenie zablokowane."
+  exec_timeout: "Brak odpowiedzi. Polecenie odrzucone dla bezpieczeństwa."
 
 # Status announcer fallback messages
 status:

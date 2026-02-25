@@ -59,6 +59,10 @@ responses:
   ha_not_configured: "स्मार्ट होम इंटीग्रेशन कॉन्फ़िगर नहीं है।"
   ha_connection_error: "स्मार्ट होम से कनेक्ट नहीं हो पा रही।"
   ha_no_response: "स्मार्ट होम ने जवाब नहीं दिया।"
+  exec_approval_request: "एजेंट एक कमांड चलाना चाहता है: {command}। क्या अनुमति दूं?"
+  exec_approved: "स्वीकृत। कमांड चला रही हूँ।"
+  exec_denied: "अस्वीकृत। कमांड ब्लॉक किया गया।"
+  exec_timeout: "कोई प्रतिक्रिया नहीं। सुरक्षा के लिए कमांड अस्वीकृत।"
 
 # Status announcer fallback messages
 status:

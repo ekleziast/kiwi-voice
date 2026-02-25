@@ -64,6 +64,10 @@ responses:
   ha_not_configured: "Интеграция с умным домом не настроена."
   ha_connection_error: "Не могу подключиться к умному дому."
   ha_no_response: "Умный дом не ответил на команду."
+  exec_approval_request: "Агент хочет выполнить команду: {command}. Разрешить?"
+  exec_approved: "Разрешено. Выполняю команду."
+  exec_denied: "Отказано. Команда заблокирована."
+  exec_timeout: "Нет ответа. Команда отклонена для безопасности."
 
 # Status announcer fallback messages
 status:

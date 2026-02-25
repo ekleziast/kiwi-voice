@@ -66,6 +66,7 @@ class OpenClawWebSocket:
         on_activity: Optional[Callable[[dict], None]] = None,
         on_resume: Optional[Callable] = None,
         on_wave_end: Optional[Callable] = None,
+        on_exec_approval: Optional[Callable[[dict], None]] = None,
         log_func: Optional[Callable] = None,
     ):
         self.config = config
@@ -74,6 +75,7 @@ class OpenClawWebSocket:
         self.on_activity = on_activity
         self.on_resume = on_resume
         self.on_wave_end = on_wave_end
+        self.on_exec_approval = on_exec_approval
         self._log = log_func if log_func else (kiwi_log if UTILS_AVAILABLE else print)
 
         # WebSocket state
@@ -249,7 +251,7 @@ class OpenClawWebSocket:
         identity = self._device_identity
         signed_at_ms = int(time.time() * 1000)
 
-        scopes_str = ",".join(["operator.admin"])
+        scopes_str = ",".join(["operator.admin", "approvals"])
         payload_parts = [
             "v2",
             identity["deviceId"],
@@ -528,6 +530,14 @@ class OpenClawWebSocket:
             ts = payload.get("ts", 0)
             self._log_ws(f"Received connect.challenge (nonce={nonce[:16]}..., ts={ts})", "INFO")
             self._send_connect(nonce)
+
+        elif event_name == "exec.approval.requested":
+            self._handle_exec_approval_requested(payload)
+
+        elif event_name == "exec.approval.resolved":
+            approval_id = payload.get("id", "")
+            decision = payload.get("decision", "")
+            self._log_ws(f"Exec approval resolved externally: {approval_id[:12]} → {decision}", "INFO")
 
         elif event_name == "chat":
             # Legacy/normalized chat event with payload.state
@@ -1024,6 +1034,70 @@ class OpenClawWebSocket:
             self._log_ws(f"Agent stream ignored: {stream}", "DEBUG")
 
     # ------------------------------------------------------------------
+    # Exec Approval: OpenClaw asks for confirmation before running a command
+    # ------------------------------------------------------------------
+
+    def _handle_exec_approval_requested(self, payload: dict):
+        """Handle exec.approval.requested event from OpenClaw Gateway.
+
+        When an agent tries to execute a shell command that requires approval,
+        OpenClaw broadcasts this event. We forward it to the service layer
+        which can ask the owner via voice or Telegram.
+        """
+        approval_id = payload.get("id", "")
+        request = payload.get("request", {})
+        command = request.get("command", "")
+        cwd = request.get("cwd", "")
+        expires_at = payload.get("expiresAtMs", 0)
+
+        self._log_ws(
+            f"Exec approval requested: id={approval_id[:12]}, "
+            f"command='{command[:80]}', cwd={cwd}",
+            "INFO",
+        )
+
+        if self.on_exec_approval:
+            try:
+                self.on_exec_approval({
+                    "id": approval_id,
+                    "command": command,
+                    "cwd": cwd,
+                    "host": request.get("host", ""),
+                    "security": request.get("security", ""),
+                    "expires_at_ms": expires_at,
+                })
+            except Exception as e:
+                self._log_ws(f"on_exec_approval callback error: {e}", "ERROR")
+        else:
+            self._log_ws("No on_exec_approval handler — approval will timeout", "WARNING")
+
+    def resolve_exec_approval(self, approval_id: str, decision: str) -> bool:
+        """Send exec.approval.resolve to OpenClaw Gateway.
+
+        Args:
+            approval_id: The approval ID from the exec.approval.requested event
+            decision: "allow-once", "allow-always", or "deny"
+
+        Returns:
+            True if the request was sent successfully
+        """
+        if decision not in ("allow-once", "allow-always", "deny"):
+            self._log_ws(f"Invalid exec approval decision: {decision}", "ERROR")
+            return False
+
+        result = self._request("exec.approval.resolve", {
+            "id": approval_id,
+            "decision": decision,
+        }, timeout=10.0)
+
+        ok = result.get("ok", False)
+        if ok:
+            self._log_ws(f"Exec approval resolved: {approval_id[:12]} → {decision}", "INFO")
+        else:
+            self._log_ws(f"Exec approval resolve failed: {result.get('error', 'unknown')}", "ERROR")
+        return ok
+
+    # ------------------------------------------------------------------
     # Deferred final: debounce lifecycle:end for multi-wave agent responses
     # ------------------------------------------------------------------
 
@@ -1360,7 +1434,7 @@ class OpenClawWebSocket:
                 "mode": "backend"
             },
             "role": "operator",
-            "scopes": ["operator.admin"],
+            "scopes": ["operator.admin", "approvals"],
             "caps": [],
             "auth": {
                 "token": self._gateway_token

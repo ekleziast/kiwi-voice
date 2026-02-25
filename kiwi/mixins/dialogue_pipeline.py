@@ -130,7 +130,21 @@ class DialoguePipelineMixin:
             self._owner_profile_warning_shown = True
 
     def _stage_check_approval(self, ctx: CommandContext) -> None:
-        """Expire stale approvals, handle owner yes/no."""
+        """Expire stale approvals, handle owner yes/no (both voice and exec approvals)."""
+        # --- OpenClaw exec approval (post-filter) ---
+        if self._pending_exec_approval and ctx.is_owner:
+            if self._approval_yes(ctx.command_lower):
+                kiwi_log("EXEC-APPROVAL", "Approved by owner via voice", level="INFO")
+                self.resolve_pending_exec_approval(True)
+                ctx.abort = True
+                return
+            elif self._approval_no(ctx.command_lower):
+                kiwi_log("EXEC-APPROVAL", "Denied by owner via voice", level="INFO")
+                self.resolve_pending_exec_approval(False)
+                ctx.abort = True
+                return
+
+        # --- Kiwi voice approval (pre-filter) ---
         if self._pending_owner_approval:
             age = time.time() - float(self._pending_owner_approval.get("timestamp", 0.0))
             if age > self._owner_approval_timeout:

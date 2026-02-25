@@ -59,6 +59,10 @@ responses:
   ha_not_configured: "L'integrazione con la casa intelligente non è configurata."
   ha_connection_error: "Non riesco a connettermi alla casa intelligente."
   ha_no_response: "La casa intelligente non ha risposto."
+  exec_approval_request: "L'agente vuole eseguire un comando: {command}. Lo permetto?"
+  exec_approved: "Approvato. Esecuzione del comando."
+  exec_denied: "Negato. Comando bloccato."
+  exec_timeout: "Nessuna risposta. Comando negato per sicurezza."
 
 # Status announcer fallback messages
 status:

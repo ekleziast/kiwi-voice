@@ -59,6 +59,10 @@ responses:
   ha_not_configured: "스마트 홈 연동이 설정되지 않았어."
   ha_connection_error: "스마트 홈에 연결할 수 없어."
   ha_no_response: "스마트 홈이 응답하지 않았어."
+  exec_approval_request: "에이전트가 명령을 실행하려고 합니다: {command}. 허용할까요?"
+  exec_approved: "승인됨. 명령을 실행합니다."
+  exec_denied: "거부됨. 명령이 차단되었습니다."
+  exec_timeout: "응답 없음. 보안을 위해 명령이 거부되었습니다."
 
 # Status announcer fallback messages
 status:

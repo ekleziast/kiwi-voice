@@ -64,6 +64,10 @@ responses:
   ha_not_configured: "Smart home integration is not configured."
   ha_connection_error: "Cannot connect to smart home."
   ha_no_response: "Smart home did not respond."
+  exec_approval_request: "The agent wants to run a command: {command}. Should I allow it?"
+  exec_approved: "Approved. Running the command."
+  exec_denied: "Denied. Command blocked."
+  exec_timeout: "No response received. Command denied for safety."
 
 # Status announcer fallback messages
 status:
