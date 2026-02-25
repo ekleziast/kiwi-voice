@@ -1,5 +1,7 @@
 <p align="center">
-  <img src="https://em-content.zobj.net/source/apple/391/kiwi-fruit_1f95d.png" width="120" alt="Kiwi Voice">
+  <a href="https://kiwi-voice.com">
+    <img src="https://kiwi-voice.com/assets/og-image.svg" width="600" alt="Kiwi Voice — Open-Source Voice Interface for AI Agents">
+  </a>
 </p>
 
 <h1 align="center">Kiwi Voice</h1>
