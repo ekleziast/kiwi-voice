@@ -1319,6 +1319,7 @@ class KiwiListener:
                 channels=1,
                 dtype=np.float32,
                 blocksize=chunk_samples,
+                device=self.config.input_device,
                 callback=calibration_callback
             ):
                 kiwi_log("CALIB", f"Stream opened, sleeping {self.config.noise_sample_duration}s...")
@@ -1925,6 +1926,7 @@ class KiwiListener:
             channels=1,
             dtype=np.float32,
             blocksize=chunk_samples,
+            device=self.config.input_device,
             callback=audio_callback
         ):
             while self.is_running:

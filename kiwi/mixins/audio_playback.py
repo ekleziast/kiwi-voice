@@ -125,7 +125,7 @@ class AudioPlaybackMixin:
         try:
             self._is_speaking = True
             kiwi_log("SOUND", "Playing idle sound...", level="INFO")
-            sd.play(self._idle_sound, self._idle_sr)
+            sd.play(self._idle_sound, self._idle_sr, device=self.config.output_device)
             sd.wait()
             self._is_speaking = False
             self.listener._sound_end_time = time.time()
@@ -145,7 +145,7 @@ class AudioPlaybackMixin:
 
         def _play_with_end_marker():
             try:
-                sd.play(self._beep_sound, self._beep_sr)
+                sd.play(self._beep_sound, self._beep_sr, device=self.config.output_device)
                 sd.wait()
                 self.listener._sound_end_time = time.time()
                 kiwi_log("SOUND", "Confirmation done", level="INFO")
@@ -166,7 +166,7 @@ class AudioPlaybackMixin:
         """Play startup sound (blocking)."""
         try:
             kiwi_log("SOUND", "Playing startup sound...", level="INFO")
-            sd.play(self._startup_sound, self._startup_sr)
+            sd.play(self._startup_sound, self._startup_sr, device=self.config.output_device)
             sd.wait()
             if hasattr(self, 'listener') and self.listener:
                 self.listener._sound_end_time = time.time()

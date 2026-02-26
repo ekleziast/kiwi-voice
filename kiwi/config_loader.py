@@ -132,6 +132,7 @@ class KiwiConfig:
 
     sample_rate: int = 24000
     output_device: Optional[str] = None
+    input_device: Optional[str] = None
     wake_word_keyword: str = "киви"
     wake_word_position_limit: int = 3
     # Wake word engine: "text" (legacy fuzzy match) | "openwakeword" (ML model)
@@ -315,6 +316,8 @@ class KiwiConfig:
                 config.tts_elevenlabs_style_presets = parsed_style_presets
 
         config.sample_rate = audio_cfg.get("sample_rate", config.sample_rate)
+        config.output_device = audio_cfg.get("output_device", config.output_device)
+        config.input_device = audio_cfg.get("input_device", config.input_device)
         if isinstance(wake_cfg, dict):
             config.wake_word_keyword = str(
                 wake_cfg.get("keyword", config.wake_word_keyword)
