@@ -338,6 +338,8 @@ class KiwiServiceOpenClaw(
             wake_word_engine=self.config.wake_word_engine,
             wake_word_model=self.config.wake_word_model,
             wake_word_threshold=self.config.wake_word_threshold,
+            input_device=self.config.input_device,
+            output_device=self.config.output_device,
         )
         self.listener = KiwiListener(
             config=listener_config,

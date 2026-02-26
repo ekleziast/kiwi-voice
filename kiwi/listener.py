@@ -374,6 +374,8 @@ class ListenerConfig:
     wake_word_engine: str = "text"
     wake_word_model: str = "hey_jarvis"
     wake_word_threshold: float = 0.5
+    input_device: Optional[str] = None
+    output_device: Optional[str] = None
 
 
 class WakeWordDetector:
