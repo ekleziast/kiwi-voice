@@ -118,6 +118,23 @@ speaker_priority:
     name: "Owner"            # Change to your name
 ```
 
+### Pair with OpenClaw Gateway (first time only)
+
+On first launch, Kiwi registers as a new device with the Gateway. You need to **approve the pairing request** before it can connect:
+
+1. **Start Kiwi** in one terminal:
+   ```bash
+   python -m kiwi
+   ```
+
+2. **In a second terminal**, approve the pending device:
+   ```bash
+   openclaw devices list      # see pending requests
+   openclaw devices approve   # approve the latest one
+   ```
+
+Kiwi will automatically reconnect once approved. This is a one-time step — the device identity is saved to `device-identity.json` and persists across restarts.
+
 ### Run
 
 ```bash

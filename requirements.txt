@@ -50,3 +50,4 @@ openwakeword>=0.6.0
 # MLX Whisper — Apple Silicon only (optional)
 # Uncomment on macOS with Apple Silicon:
 # lightning-whisper-mlx>=0.4.0
+piper-tts>=1.4.0
