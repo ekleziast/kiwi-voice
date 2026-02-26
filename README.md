@@ -135,6 +135,8 @@ On first launch, Kiwi registers as a new device with the Gateway. You need to **
 
 Kiwi will automatically reconnect once approved. This is a one-time step — the device identity is saved to `device-identity.json` and persists across restarts.
 
+> **Note:** If you skip device pairing, Kiwi will fall back to OpenClaw CLI mode, which is functional but slower due to process spawning overhead. WebSocket pairing is recommended for real-time voice interaction.
+
 ### Run
 
 ```bash
