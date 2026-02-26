@@ -645,6 +645,8 @@ class ElevenLabsWSStreamManager:
                         channels=1,
                         dtype="float32",
                         device=self._output_device,
+                        blocksize=2400,
+                        latency="high",
                     )
                     stream.start()
                     if self._on_first_audio:
