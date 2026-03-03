@@ -6,7 +6,7 @@ Main orchestrator: KiwiServiceOpenClaw class + main() entry point.
 Mixin modules: audio_playback, tts_speech, stream_watchdog,
 llm_callbacks, dialogue_pipeline.
 Extracted modules: config_loader, state_machine, streaming_tts,
-openclaw_ws, openclaw_cli, task_announcer.
+openclaw_ws, openclaw_cli.
 """
 
 import os
@@ -130,7 +130,6 @@ from kiwi.state_machine import DialogueState
 from kiwi.tts.streaming import StreamingTTSManager
 from kiwi.openclaw_ws import OpenClawWebSocket
 from kiwi.openclaw_cli import OpenClawCLI
-from kiwi.task_announcer import TaskStatusAnnouncer
 from kiwi.i18n import setup as i18n_setup, t
 
 # Mixins
@@ -231,8 +230,7 @@ class KiwiServiceOpenClaw(
         self._stream_watchdog_retry_count = 0
         self._stream_watchdog_retrying = False
 
-        # === TASK STATUS ANNOUNCER ===
-        self._task_status_announcer: Optional[TaskStatusAnnouncer] = None
+        self._task_status_announcer = None  # removed (no status announcements)
 
         with open(os.path.join(LOGS_DIR, 'kiwi_startup.log'), 'a', encoding='utf-8') as f:
             f.write('[START] KiwiServiceOpenClaw.__init__ starting...\n')
@@ -409,7 +407,7 @@ class KiwiServiceOpenClaw(
                     on_token=self._on_llm_token,
                     on_complete=self._on_llm_complete,
                     on_activity=self._on_agent_activity,
-                    on_resume=self._on_llm_resume,
+                    on_resume=None,
                     on_wave_end=self._on_wave_end,
                     on_exec_approval=self._on_exec_approval_request,
                     log_func=kiwi_log if UTILS_AVAILABLE else print,
@@ -613,13 +611,6 @@ class KiwiServiceOpenClaw(
                 pass
             self._streaming_tts_manager = None
 
-        if self._task_status_announcer:
-            try:
-                self._task_status_announcer.stop()
-            except Exception:
-                pass
-            self._task_status_announcer = None
-
         self._cancel_idle_timer()
 
         if self._api:
@@ -699,12 +690,6 @@ def main():
                             except Exception:
                                 pass
                             service._streaming_tts_manager = None
-                        if service._task_status_announcer:
-                            try:
-                                service._task_status_announcer.stop()
-                            except Exception:
-                                pass
-                            service._task_status_announcer = None
                         service._is_speaking = False
                         service._is_streaming = False
                         service._set_state(DialogueState.IDLE)

@@ -735,19 +735,6 @@ class OpenClawWebSocket:
 
         return normalized[0]
 
-    def _emit_activity(self, activity_type: str, message: str, details: Optional[dict] = None):
-        """Pass an activity event to the service if a callback is connected."""
-        if not self.on_activity or not message:
-            return
-        try:
-            self.on_activity({
-                "type": activity_type,
-                "message": message,
-                "details": details or {},
-            })
-        except Exception as e:
-            self._log_ws(f"Activity callback error: {e}", "DEBUG")
-
     def _extract_tool_name(self, data: dict) -> str:
         tool = data.get("tool") or data.get("name") or data.get("toolName") or data.get("id")
         if isinstance(tool, dict):
@@ -757,74 +744,6 @@ class OpenClawWebSocket:
             if isinstance(tool_info, dict):
                 tool = tool_info.get("name") or tool_info.get("tool")
         return str(tool or "").strip()
-
-    def _extract_tool_command(self, data: dict) -> str:
-        candidates = [data.get("command"), data.get("cmd"), data.get("script")]
-
-        for key in ("input", "args", "parameters", "params"):
-            value = data.get(key)
-            if isinstance(value, dict):
-                candidates.append(value.get("command"))
-                candidates.append(value.get("cmd"))
-                candidates.append(value.get("script"))
-
-        tool_call = data.get("toolCall") or data.get("call")
-        if isinstance(tool_call, dict):
-            args = tool_call.get("args") or tool_call.get("arguments")
-            if isinstance(args, dict):
-                candidates.append(args.get("command"))
-                candidates.append(args.get("cmd"))
-                candidates.append(args.get("script"))
-            elif isinstance(args, str):
-                candidates.append(args)
-
-        for item in candidates:
-            if isinstance(item, str) and item.strip():
-                return item.strip()
-        return ""
-
-    def _describe_tool_activity(self, data: dict) -> str:
-        command = self._extract_tool_command(data)
-        tool_name = self._extract_tool_name(data).lower()
-        phase = str(data.get("phase", data.get("status", data.get("state", "")))).lower()
-
-        if phase in ("error", "failed", "fail"):
-            return t("tool_activity.tool_error")
-        if phase in ("end", "done", "complete", "completed", "success", "ok"):
-            return ""
-
-        if command:
-            cmd = command.lower()
-            if re.search(r"\bcd\b", cmd) or "set-location" in cmd:
-                return t("tool_activity.opening_folder")
-            if "get-childitem" in cmd or re.search(r"\brg\b", cmd) or " --files" in cmd or re.search(r"\bls\b", cmd):
-                return t("tool_activity.browsing_structure")
-            if "get-content" in cmd or re.search(r"\bcat\b", cmd) or re.search(r"\bsed\b", cmd):
-                match = re.search(r"(?:get-content|cat)\s+([^\s|;]+)", command, re.IGNORECASE)
-                if match:
-                    path = match.group(1).strip("'\"")
-                    return t("tool_activity.analyzing_file", path=path)
-                return t("tool_activity.reading_code")
-            if "select-string" in cmd or re.search(r"\brg\s+-n\b", cmd):
-                return t("tool_activity.searching_code")
-            if "pytest" in cmd or "py_compile" in cmd or "npm test" in cmd or "cargo test" in cmd:
-                return t("tool_activity.running_tests")
-            if "apply_patch" in cmd or "*** begin patch" in cmd:
-                return t("tool_activity.editing_code")
-            if re.search(r"\bgit\s+", cmd):
-                return t("tool_activity.checking_repo")
-            return t("tool_activity.project_steps")
-
-        if "shell_command" in tool_name:
-            return t("tool_activity.running_command")
-        if "apply_patch" in tool_name:
-            return t("tool_activity.editing_code")
-        if "read" in tool_name or "open" in tool_name:
-            return t("tool_activity.reading_files")
-        if "search" in tool_name or "find" in tool_name:
-            return t("tool_activity.searching_info")
-
-        return t("tool_activity.continuing_work")
 
     def _classify_tool_error(self, data: dict) -> str:
         """Extract user-friendly Russian message from a tool error event."""
@@ -952,7 +871,6 @@ class OpenClawWebSocket:
             if phase in ("thinking", "plan", "planning"):
                 # Agent starting a new thinking step — cancel pending final
                 self._cancel_deferred_final()
-                self._emit_activity("lifecycle", t("tool_activity.planning"), {"phase": phase})
 
             if phase in ("end", "done", "complete", "completed", "finish", "finished"):
                 # Don't fire final immediately — the agent may continue with
@@ -972,7 +890,6 @@ class OpenClawWebSocket:
 
             if phase in ("error", "failed", "fail"):
                 self._cancel_deferred_final()  # error overrides any pending final
-                self._emit_activity("lifecycle", t("tool_activity.error_checking"), {"phase": phase})
                 err = data.get("error") or data.get("message") or data.get("reason") or "Unknown lifecycle error"
                 self._handle_chat_event({
                     "runId": run_id,
@@ -1024,9 +941,6 @@ class OpenClawWebSocket:
             # Update watchdog -- tool calls mean the LLM is working,
             # even if no text tokens have arrived yet.
             self._touch_stream_progress(stream)
-            tool_msg = self._describe_tool_activity(data)
-            if tool_msg:
-                self._emit_activity("tool", tool_msg, {"stream": stream})
             return
 
         # tool/compaction/reasoning and other internal streams are not converted to voice responses.

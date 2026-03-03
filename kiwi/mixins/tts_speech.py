@@ -163,9 +163,8 @@ class TTSSpeechMixin:
     # ------------------------------------------------------------------
 
     def _start_streaming_runtime(self, command: str):
-        """Start StreamingTTSManager + TaskStatusAnnouncer for current request."""
+        """Start StreamingTTSManager for current request."""
         from kiwi.tts.streaming import StreamingTTSManager
-        from kiwi.task_announcer import TaskStatusAnnouncer
 
         # Critical: reset barge-in flag so the new WS playback worker
         # doesn't see a stale True from a previous interaction and exit immediately.
@@ -175,11 +174,6 @@ class TTSSpeechMixin:
             kiwi_log("KIWI", "Stopping previous StreamingTTSManager", level="INFO")
             self._streaming_tts_manager.stop(graceful=False)
             self._streaming_tts_manager = None
-        if self._task_status_announcer:
-            kiwi_log("KIWI", "Stopping previous TaskStatusAnnouncer", level="INFO")
-            self._task_status_announcer.stop()
-            self._task_status_announcer = None
-
         use_ws = (
             self.tts_provider == "elevenlabs"
             and getattr(self.config, "tts_elevenlabs_ws_streaming", True)
@@ -202,43 +196,23 @@ class TTSSpeechMixin:
                 if hasattr(self, "listener") and self.listener:
                     self.listener._tts_start_time = time.time()
                     self.listener._barge_in_counter = 0
-                try:
-                    if self._task_status_announcer:
-                        self._task_status_announcer.on_tts_playing(True)
-                except Exception:
-                    pass
-
             def _ws_on_playback_done():
                 self._is_speaking = False
                 if hasattr(self, "listener") and self.listener:
                     self.listener._tts_start_time = time.time()
-                try:
-                    if self._task_status_announcer:
-                        self._task_status_announcer.on_tts_playing(False)
-                except Exception:
-                    pass
 
             def _ws_is_interrupted():
                 return self._barge_in_requested or not self.is_running
 
             def _ws_on_connection_lost():
                 kiwi_log("KIWI", "ElevenLabs WS connection lost mid-stream", level="WARNING")
-                if self._task_status_announcer:
-                    self._task_status_announcer.stop()
-                    self._task_status_announcer = None
 
             def _ws_on_playback_idle():
-                """ElevenLabs WS has no audio to play — mark speaking as done
-                so the status announcer can speak between response waves."""
+                """ElevenLabs WS has no audio to play — mark speaking as done."""
                 kiwi_log("KIWI", "ElevenLabs WS playback idle (inter-wave gap)", level="DEBUG")
                 self._is_speaking = False
                 if hasattr(self, "listener") and self.listener:
                     self.listener._tts_start_time = time.time()
-                try:
-                    if self._task_status_announcer:
-                        self._task_status_announcer.on_tts_playing(False)
-                except Exception:
-                    pass
 
             def _ws_on_audio_activity():
                 """ElevenLabs WS is actively playing audio — keep watchdog alive."""
@@ -274,43 +248,6 @@ class TTSSpeechMixin:
             )
 
         self._streaming_tts_manager.start()
-        self._create_status_announcer(command, intervals=[6, 20, 45, 90, 150])
-
-    def _create_status_announcer(self, command: str, intervals: list = None):
-        """Create and start a TaskStatusAnnouncer with a stop-aware speak wrapper."""
-        from kiwi.task_announcer import TaskStatusAnnouncer
-
-        if self._task_status_announcer:
-            self._task_status_announcer.stop_nowait()
-
-        self._task_status_announcer = TaskStatusAnnouncer(
-            speak_func=self._speak_chunk,
-            intervals=intervals or [6, 20, 45, 90, 150],
-        )
-
-        # Replace speak_func with a stop-aware wrapper that checks the
-        # announcer's _stop_event between synthesis and playback.
-        # Without this, a long REST TTS call (4-5s) that started before
-        # stop_nowait() can still play audio after the response was
-        # interrupted by barge-in.
-        _stop_ev = self._task_status_announcer._stop_event
-
-        def _announcer_speak(chunk: str):
-            if self._is_speaking:
-                return
-            result = self._synthesize_chunk(chunk)
-            if not result:
-                return
-            if _stop_ev.is_set():
-                kiwi_log("TTS-CHUNK", "Skipping announcer playback: stopped during synthesis", level="INFO")
-                return
-            audio, sample_rate = result
-            if self._is_speaking:
-                return
-            self._play_audio_chunk_streaming(audio, sample_rate)
-
-        self._task_status_announcer.speak_func = _announcer_speak
-        self._task_status_announcer.start(command)
 
     # ------------------------------------------------------------------
     # Chunk-level speak / playback
@@ -375,12 +312,6 @@ class TTSSpeechMixin:
                 self.listener._tts_start_time = time.time()
                 self.listener._barge_in_counter = 0
 
-            try:
-                if self._task_status_announcer:
-                    self._task_status_announcer.on_tts_playing(True)
-            except Exception:
-                pass
-
             with self._sd_play_lock:
                 sd.play(audio, sample_rate, device=self.config.output_device)
 
@@ -438,12 +369,6 @@ class TTSSpeechMixin:
             self._is_speaking = False
             if hasattr(self, "listener") and self.listener:
                 self.listener._tts_start_time = time.time()
-
-            try:
-                if self._task_status_announcer:
-                    self._task_status_announcer.on_tts_playing(False)
-            except Exception:
-                pass
 
     def _play_streaming_response_chunk(self, audio: np.ndarray, sample_rate: int):
         """Playback callback for LLM response chunks only (not status announcer)."""

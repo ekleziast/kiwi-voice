@@ -560,9 +560,6 @@ class DialoguePipelineMixin:
             self._stop_stream_watchdog()
             self._streaming_tts_manager.stop(graceful=False)
             self._streaming_tts_manager = None
-            if self._task_status_announcer:
-                self._task_status_announcer.stop()
-                self._task_status_announcer = None
             self.speak(t("responses.error_send_failed"), style="calm")
             self._set_state(DialogueState.IDLE)
         else:

@@ -280,9 +280,6 @@ class AudioPlaybackMixin:
             if hasattr(self, "listener") and self.listener:
                 self.listener._tts_start_time = time.time()
                 self.listener._barge_in_counter = 0
-            if self._task_status_announcer:
-                self._task_status_announcer.on_tts_playing(True)
-
             sd.play(audio, sample_rate, device=self.config.output_device)
             output_stream = sd.get_stream()
 
@@ -305,9 +302,6 @@ class AudioPlaybackMixin:
             self._is_speaking = False
             if hasattr(self, "listener") and self.listener:
                 self.listener._tts_start_time = time.time()
-            if self._task_status_announcer:
-                self._task_status_announcer.on_tts_playing(False)
-
     def _get_web_audio_bridge(self):
         """Return the WebAudioBridge instance if available and has clients."""
         api = getattr(self, "_api", None)

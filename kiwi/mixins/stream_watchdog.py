@@ -233,10 +233,6 @@ class StreamWatchdogMixin:
             if self._streaming_tts_manager:
                 self._streaming_tts_manager.stop(graceful=False)
                 self._streaming_tts_manager = None
-            if self._task_status_announcer:
-                self._task_status_announcer.stop()
-                self._task_status_announcer = None
-
             self._set_state(DialogueState.IDLE)
             self.speak(t("responses.error_stream_stalled"), style="calm")
             return
@@ -257,18 +253,13 @@ class StreamWatchdogMixin:
             kiwi_log("STREAM-WATCHDOG", "Retry step 2/7: cancel", level="DEBUG")
             self.openclaw.cancel()
 
-            kiwi_log("STREAM-WATCHDOG", "Retry step 3/7: stop TTS manager", level="DEBUG")
+            kiwi_log("STREAM-WATCHDOG", "Retry step 3/6: stop TTS manager", level="DEBUG")
             if self._streaming_tts_manager:
                 self._streaming_tts_manager.stop(graceful=False)
                 self._streaming_tts_manager = None
 
-            kiwi_log("STREAM-WATCHDOG", "Retry step 4/7: stop announcer", level="DEBUG")
-            if self._task_status_announcer:
-                self._task_status_announcer.stop()
-                self._task_status_announcer = None
-
             # Check if WS connection is alive; if dead, reconnect first
-            kiwi_log("STREAM-WATCHDOG", "Retry step 5/7: check WS alive", level="DEBUG")
+            kiwi_log("STREAM-WATCHDOG", "Retry step 4/6: check WS alive", level="DEBUG")
             ws_alive = getattr(self.openclaw, "is_ws_alive", None)
             if callable(ws_alive) and not ws_alive(15.0):
                 kiwi_log("STREAM-WATCHDOG",
@@ -279,13 +270,13 @@ class StreamWatchdogMixin:
                     reconnect_fn("stream stall recovery")
 
             # Re-arm generation counter for the retry
-            kiwi_log("STREAM-WATCHDOG", "Retry step 6/7: re-arm + start streaming runtime", level="DEBUG")
+            kiwi_log("STREAM-WATCHDOG", "Retry step 5/6: re-arm + start streaming runtime", level="DEBUG")
             with self._streaming_completion_lock:
                 self._streaming_generation = 1
             self._streaming_response_playback_started = False
 
             self._start_streaming_runtime(command)
-            kiwi_log("STREAM-WATCHDOG", "Retry step 7/7: send_message", level="DEBUG")
+            kiwi_log("STREAM-WATCHDOG", "Retry step 6/6: send_message", level="DEBUG")
             resend_ok = self.openclaw.send_message(command)
             if not resend_ok:
                 kiwi_log("STREAM-WATCHDOG", "Retry send failed", level="ERROR")
