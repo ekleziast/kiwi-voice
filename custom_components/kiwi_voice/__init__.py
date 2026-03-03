@@ -18,7 +18,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN
+from .const import CONF_API_TOKEN, DOMAIN
 from .coordinator import KiwiVoiceCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,8 +53,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """
     host = entry.data["host"]
     port = entry.data.get("port", 7789)
+    token = entry.data.get(CONF_API_TOKEN, "")
 
-    coordinator = KiwiVoiceCoordinator(hass, host, port)
+    coordinator = KiwiVoiceCoordinator(hass, host, port, token=token)
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

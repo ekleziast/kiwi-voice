@@ -24,7 +24,10 @@ async def async_setup_entry(
 ) -> None:
     """Set up Kiwi Voice switch entities from a config entry."""
     coordinator: KiwiVoiceCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([KiwiListeningSwitch(coordinator, entry)])
+    entities = []
+    if coordinator.has_scope("control"):
+        entities.append(KiwiListeningSwitch(coordinator, entry))
+    async_add_entities(entities)
 
 
 class KiwiListeningSwitch(CoordinatorEntity[KiwiVoiceCoordinator], SwitchEntity):

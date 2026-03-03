@@ -3,7 +3,7 @@
 
 import os
 import re
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, List, Any
 from dataclasses import dataclass, field
 
 from kiwi.utils import kiwi_log
@@ -147,6 +147,8 @@ class KiwiConfig:
     api_enabled: bool = True
     api_host: str = "0.0.0.0"
     api_port: int = 7789
+    api_auth_enabled: bool = False
+    api_auth_tokens: List[Dict[str, Any]] = field(default_factory=list)
 
     # Web Audio (browser microphone via WebSocket)
     web_audio_enabled: bool = True
@@ -385,7 +387,25 @@ class KiwiConfig:
             config.api_host = str(api_cfg.get("host", config.api_host)).strip()
             config.api_port = int(api_cfg.get("port", config.api_port))
 
+        # API auth settings
+        auth_cfg = api_cfg.get("auth", {}) if isinstance(api_cfg, dict) else {}
+        if isinstance(auth_cfg, dict):
+            raw_auth_enabled = auth_cfg.get("enabled", config.api_auth_enabled)
+            if isinstance(raw_auth_enabled, str):
+                config.api_auth_enabled = raw_auth_enabled.strip().lower() in ("true", "1", "yes")
+            else:
+                config.api_auth_enabled = bool(raw_auth_enabled)
+            raw_tokens = auth_cfg.get("tokens", [])
+            if isinstance(raw_tokens, list):
+                config.api_auth_tokens = [
+                    {"token": str(t["token"]), "name": str(t.get("name", "")), "scopes": list(t.get("scopes", []))}
+                    for t in raw_tokens
+                    if isinstance(t, dict) and t.get("token")
+                ]
+
         # Env var overrides for API
+        if os.getenv("KIWI_API_AUTH_ENABLED"):
+            config.api_auth_enabled = os.getenv("KIWI_API_AUTH_ENABLED").strip().lower() in ("true", "1", "yes")
         if os.getenv("KIWI_API_ENABLED"):
             config.api_enabled = os.getenv("KIWI_API_ENABLED").strip().lower() in ("true", "1", "yes")
         if os.getenv("KIWI_API_HOST"):

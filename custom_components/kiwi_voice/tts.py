@@ -28,7 +28,10 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Kiwi Voice TTS entity from a config entry."""
     coordinator: KiwiVoiceCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([KiwiTTSEntity(coordinator, entry)])
+    entities = []
+    if coordinator.has_scope("tts"):
+        entities.append(KiwiTTSEntity(coordinator, entry))
+    async_add_entities(entities)
 
 
 class KiwiTTSEntity(TextToSpeechEntity):

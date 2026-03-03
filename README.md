@@ -345,6 +345,41 @@ api:
   port: 7789
 ```
 
+### API Authentication
+
+By default the API is open (no auth). To secure it, enable token-based authentication with scopes:
+
+```yaml
+api:
+  auth:
+    enabled: true
+    tokens:
+      - token: "your-secret-token-here"
+        name: "Home Assistant"
+        scopes: ["read", "control", "tts"]
+      - token: "admin-token-here"
+        name: "Admin"
+        scopes: ["read", "control", "tts", "speakers", "admin"]
+```
+
+Each token gets a set of scopes that control what it can access:
+
+| Scope | Allows |
+|-------|--------|
+| `read` | GET endpoints — status, config, speakers, languages, souls |
+| `control` | POST stop, reset-context, language, soul; PATCH config |
+| `tts` | POST tts/test — speak arbitrary text |
+| `speakers` | DELETE/block/unblock speaker profiles |
+| `admin` | POST restart, shutdown |
+
+Requests must include `Authorization: Bearer <token>`. Static files (`/`, `/static/*`) are always open.
+
+Use `GET /api/auth/scopes` to discover what scopes a token has.
+
+Override via env var: `KIWI_API_AUTH_ENABLED=true`
+
+> **CLI mode caveat:** API scopes only apply to the REST API. When Kiwi falls back to CLI mode (direct `openclaw` subprocess calls during WebSocket outage), exec approval is not available — that's an architectural boundary, not a bug. WebSocket mode is recommended for full security coverage.
+
 ## Web Audio Streaming
 
 The dashboard includes a **Web Microphone** that lets you talk to Kiwi directly from the browser — no local microphone setup or pyaudio installation needed.
@@ -369,9 +404,9 @@ web_audio:
 
 Bidirectional integration: control Kiwi from HA dashboard, and control your smart home by voice through Kiwi via the Conversation API.
 
-Copy `custom_components/kiwi_voice/` to your HA `custom_components/` directory. Add the integration via the HA UI — it auto-discovers Kiwi Voice on your network.
+Copy `custom_components/kiwi_voice/` to your HA `custom_components/` directory. Add the integration via the HA UI — enter host, port, and optionally an API token (if auth is enabled in `config.yaml`). The token can also be changed later in the integration options without re-pairing.
 
-**Entities:** state sensor, language sensor, HA connection sensor, speakers count, uptime, listening switch, stop/reset/TTS buttons, TTS platform, voice control services.
+**Entities:** state sensor, language sensor, HA connection sensor, speakers count, uptime, listening switch, stop/reset/TTS buttons, TTS platform, voice control services. Entities are created based on token scopes — e.g. the stop button only appears if the token has `control` scope.
 
 **Voice control:** Say *"Kiwi, turn on the lights"* — the command is routed to HA Conversation API and the response is spoken back. Configure in `config.yaml`:
 ```yaml

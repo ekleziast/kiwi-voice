@@ -23,11 +23,13 @@ async def async_setup_entry(
 ) -> None:
     """Set up Kiwi Voice button entities from a config entry."""
     coordinator: KiwiVoiceCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([
-        KiwiStopButton(coordinator, entry),
-        KiwiResetContextButton(coordinator, entry),
-        KiwiTestTTSButton(coordinator, entry),
-    ])
+    entities = []
+    if coordinator.has_scope("control"):
+        entities.append(KiwiStopButton(coordinator, entry))
+        entities.append(KiwiResetContextButton(coordinator, entry))
+    if coordinator.has_scope("tts"):
+        entities.append(KiwiTestTTSButton(coordinator, entry))
+    async_add_entities(entities)
 
 
 class KiwiStopButton(CoordinatorEntity[KiwiVoiceCoordinator], ButtonEntity):

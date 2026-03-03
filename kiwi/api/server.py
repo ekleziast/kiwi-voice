@@ -56,6 +56,54 @@ def _error_response(message: str, status: int = 400) -> "web.Response":
     return _json_response({"error": message}, status=status)
 
 
+# Scope → route mapping: {(method, path_prefix): required_scope}
+# Routes not listed here default to "read" scope.
+ROUTE_SCOPES: dict[tuple[str, str], str] = {
+    ("GET", "/api/status"): "read",
+    ("GET", "/api/config"): "read",
+    ("GET", "/api/speakers"): "read",
+    ("GET", "/api/languages"): "read",
+    ("GET", "/api/souls"): "read",
+    ("GET", "/api/soul/current"): "read",
+    ("GET", "/api/homeassistant/status"): "read",
+    ("GET", "/api/auth/scopes"): "read",
+    ("PATCH", "/api/config"): "control",
+    ("POST", "/api/stop"): "control",
+    ("POST", "/api/reset-context"): "control",
+    ("POST", "/api/language"): "control",
+    ("POST", "/api/soul"): "control",
+    ("POST", "/api/homeassistant/command"): "control",
+    ("POST", "/api/tts/test"): "tts",
+    ("DELETE", "/api/speakers/"): "speakers",
+    ("POST", "/api/speakers/"): "speakers",
+    ("POST", "/api/restart"): "admin",
+    ("POST", "/api/shutdown"): "admin",
+}
+
+# Valid scope names
+VALID_SCOPES = {"read", "control", "tts", "speakers", "admin"}
+
+# Default scopes for new tokens (safe set)
+DEFAULT_SCOPES = ["read", "control", "tts"]
+
+
+def _get_required_scope(method: str, path: str) -> str:
+    """Determine the required scope for a given method + path."""
+    # Exact match first
+    key = (method, path)
+    if key in ROUTE_SCOPES:
+        return ROUTE_SCOPES[key]
+    # Prefix match for parameterized routes (e.g. DELETE /api/speakers/{id})
+    for (m, prefix), scope in ROUTE_SCOPES.items():
+        if m == method and prefix.endswith("/") and path.startswith(prefix):
+            return scope
+    # WebSocket endpoints require read
+    if path in ("/api/events", "/api/audio"):
+        return "read"
+    # Default to read for any unknown /api/ route
+    return "read"
+
+
 class KiwiAPI:
     """HTTP API server for Kiwi Voice."""
 
@@ -80,6 +128,14 @@ class KiwiAPI:
         self._start_time: float = time.time()
         self._event_sub_ids: list = []  # EventBus subscription IDs
         self.audio_bridge: Optional["WebAudioBridge"] = None
+        # Auth: build token lookup from config
+        self._auth_enabled: bool = getattr(service.config, "api_auth_enabled", False)
+        self._token_map: dict[str, dict] = {}
+        for t in getattr(service.config, "api_auth_tokens", []):
+            self._token_map[t["token"]] = {
+                "name": t.get("name", ""),
+                "scopes": set(t.get("scopes", DEFAULT_SCOPES)),
+            }
 
     def start(self):
         """Start the API server in a background thread."""
@@ -112,9 +168,43 @@ class KiwiAPI:
             except Exception:
                 pass
 
+    @web.middleware
+    async def _auth_middleware(self, request: "web.Request", handler):
+        """Check Bearer token and scope for /api/* requests."""
+        path = request.path
+
+        # Skip auth for non-API paths (static files, web UI)
+        if not path.startswith("/api/"):
+            return await handler(request)
+
+        # Skip auth when disabled
+        if not self._auth_enabled:
+            return await handler(request)
+
+        # Extract token from Authorization header
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return _error_response("Authentication required", status=401)
+
+        token = auth_header[7:]  # strip "Bearer "
+        token_info = self._token_map.get(token)
+        if token_info is None:
+            return _error_response("Invalid token", status=401)
+
+        # Check scope
+        required_scope = _get_required_scope(request.method, path)
+        if required_scope not in token_info["scopes"]:
+            return _error_response(
+                f"Insufficient scope: requires '{required_scope}'", status=403
+            )
+
+        # Store token info on request for handlers that need it
+        request["auth_token_info"] = token_info
+        return await handler(request)
+
     async def _start_server(self):
         """Initialize and start the aiohttp application."""
-        self._app = web.Application()
+        self._app = web.Application(middlewares=[self._auth_middleware])
 
         # Initialize WebAudio bridge if enabled
         web_audio_enabled = getattr(self.service.config, "web_audio_enabled", True)
@@ -150,6 +240,7 @@ class KiwiAPI:
         router.add_post("/api/reset-context", self._handle_reset_context)
         router.add_post("/api/restart", self._handle_restart)
         router.add_post("/api/shutdown", self._handle_shutdown)
+        router.add_get("/api/auth/scopes", self._handle_auth_scopes)
         router.add_get("/api/events", self._handle_ws_events)
         # WebAudio bridge
         if self.audio_bridge:
@@ -215,6 +306,17 @@ class KiwiAPI:
     # ------------------------------------------------------------------
     # Route handlers
     # ------------------------------------------------------------------
+
+    async def _handle_auth_scopes(self, request: "web.Request") -> "web.Response":
+        """GET /api/auth/scopes - Return scopes for the current token."""
+        if not self._auth_enabled:
+            return _json_response({"auth_enabled": False, "scopes": list(VALID_SCOPES)})
+        token_info = request.get("auth_token_info", {})
+        return _json_response({
+            "auth_enabled": True,
+            "scopes": sorted(token_info.get("scopes", [])),
+            "name": token_info.get("name", ""),
+        })
 
     async def _handle_status(self, request: "web.Request") -> "web.Response":
         """GET /api/status - Return current service state."""
