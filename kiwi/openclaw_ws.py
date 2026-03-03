@@ -620,8 +620,6 @@ class OpenClawWebSocket:
                 (stripped.startswith('{') or stripped.startswith('['))):
             return content
 
-        import re
-
         # Case 1: List with dicts [{'type': 'text', 'text': '...'}]
         # Use regex to extract all dicts from the list
         if stripped.startswith('[') and stripped.endswith(']'):
