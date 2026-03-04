@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Kiwi Voice is a multi-language real-time voice assistant integrated with the OpenClaw AI backend. It captures microphone audio, transcribes speech via Faster Whisper, detects the wake word "kiwi", identifies speakers via pyannote embeddings, communicates with OpenClaw over WebSocket, and speaks responses through configurable TTS providers.
+Kiwi Voice is a multi-language real-time voice assistant integrated with the OpenClaw AI backend. It captures microphone audio, transcribes speech via configurable STT engines (Faster Whisper, ElevenLabs cloud, or MLX Whisper), detects the wake word "kiwi", identifies speakers via pyannote embeddings, communicates with OpenClaw over WebSocket, and speaks responses through configurable TTS providers.
 
 All code comments and docstrings are in English. User-facing strings are externalized into YAML locale files (`kiwi/locales/*.yaml`) supporting 15 languages.
 
@@ -30,7 +30,7 @@ Smoke tests: `pytest tests/test_smoke.py`
 
 - `config.yaml` — primary config (language, WebSocket, STT, TTS, wake word, VAD, speaker priority, security)
 - `.env` — secrets and provider overrides (see `.env.example` for available vars)
-- Key env vars: `KIWI_LANGUAGE` (ru | en | es | de | fr | ...), `KIWI_TTS_PROVIDER` (qwen3 | piper | elevenlabs), `KIWI_QWEN_BACKEND` (runpod | local)
+- Key env vars: `KIWI_LANGUAGE` (ru | en | es | de | fr | ...), `KIWI_TTS_PROVIDER` (qwen3 | piper | elevenlabs), `KIWI_QWEN_BACKEND` (runpod | local), `KIWI_STT_ENGINE` (faster-whisper | mlx-whisper | elevenlabs)
 
 ## Architecture
 
@@ -38,7 +38,7 @@ Smoke tests: `pytest tests/test_smoke.py`
 
 ```
 Microphone (24kHz) → Audio Callback (energy + Silero VAD) → Audio Queue
-  → KiwiListener._record_loop() → Faster Whisper STT → Wake Word Detection ("kiwi")
+  → KiwiListener._record_loop() → STT (Faster Whisper | ElevenLabs | MLX Whisper) → Wake Word Detection ("kiwi")
   → Speaker ID (pyannote embedding) → Priority Check (OWNER > FRIEND > GUEST > BLOCKED)
   → Voice Security (Telegram approval for dangerous commands from non-OWNER)
   → OpenClaw WebSocket (ws://127.0.0.1:18789, Protocol v3: chat.send → delta/final events)

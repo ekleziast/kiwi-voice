@@ -101,7 +101,7 @@ tts:
 
 # STT engine
 stt:
-  engine: "faster-whisper"   # faster-whisper | mlx-whisper (Apple Silicon)
+  engine: "faster-whisper"   # faster-whisper | mlx-whisper | elevenlabs
   model: "small"             # small = fast, large = accurate
   device: "cuda"             # cuda | cpu
 
@@ -152,6 +152,20 @@ start.bat
 
 # Linux / macOS
 python -m kiwi
+```
+
+## STT Engines
+
+| Engine | Quality | Latency | Cost | Local | GPU |
+|--------|---------|---------|------|-------|-----|
+| **Faster Whisper** | Excellent | ~1–3s | Free | Yes | Optional (CUDA) |
+| **ElevenLabs** | Excellent | ~0.3–0.5s | ~$0.018/min | No | No |
+| **MLX Whisper** | Excellent | ~0.5–1s | Free | Yes | Apple Silicon |
+
+Switch engines in `config.yaml` or via environment variable:
+
+```bash
+KIWI_STT_ENGINE=elevenlabs python -m kiwi
 ```
 
 ## TTS Providers

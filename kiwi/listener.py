@@ -98,6 +98,13 @@ except ImportError:
     SPEAKER_MANAGER_AVAILABLE = False
     kiwi_log("LISTENER", "Speaker Manager not available")
 
+# ElevenLabs STT (cloud, WebSocket)
+try:
+    from kiwi.stt.elevenlabs import ElevenLabsSTT
+    ELEVENLABS_STT_AVAILABLE = True
+except ImportError:
+    ELEVENLABS_STT_AVAILABLE = False
+
 # Voice Security (Dangerous commands + Telegram approval)
 try:
     from kiwi.voice_security import VoiceSecurity, OWNER_CONTROL_PATTERNS, extract_name_from_command
@@ -234,10 +241,12 @@ class StreamingTranscriber:
     Thread-safe: audio_buffer is protected by threading.Lock.
     """
     
-    def __init__(self, model: WhisperModel, sample_rate: int = 16000,
+    def __init__(self, model, sample_rate: int = 16000,
                  chunk_interval: float = 1.5, min_audio_for_stream: float = 1.0,
-                 initial_prompt: str = WHISPER_INITIAL_PROMPT):
+                 initial_prompt: str = WHISPER_INITIAL_PROMPT,
+                 elevenlabs_stt=None):
         self.model = model
+        self._elevenlabs_stt = elevenlabs_stt
         self.sample_rate = sample_rate
         self.chunk_interval = chunk_interval
         self.min_audio_for_stream = min_audio_for_stream
@@ -309,27 +318,31 @@ class StreamingTranscriber:
                 self.transcription_in_progress = False
                 return None
             
-            # Optimized parameters for speed > accuracy (partial transcribe)
-            segments, info = self.model.transcribe(
-                audio,
-                language="ru",
-                task="transcribe",
-                beam_size=1,           # Faster than 5
-                best_of=1,             # Faster than 5
-                condition_on_previous_text=False,
-                initial_prompt=self.initial_prompt,
-                no_speech_threshold=0.7,
-                compression_ratio_threshold=2.4,  # More aggressively filter garbage
-            )
-            
-            text_parts = []
-            for segment in segments:
-                # Filter segments with high "no speech" probability
-                no_speech = getattr(segment, 'no_speech_prob', 0.0)
-                if no_speech < 0.7:
-                    text_parts.append(segment.text)
-            
-            text = " ".join(text_parts).strip()
+            # ElevenLabs cloud STT path
+            if self._elevenlabs_stt is not None:
+                text = self._elevenlabs_stt.transcribe(audio, sample_rate=self.sample_rate) or ""
+            else:
+                # Optimized parameters for speed > accuracy (partial transcribe)
+                segments, info = self.model.transcribe(
+                    audio,
+                    language="ru",
+                    task="transcribe",
+                    beam_size=1,           # Faster than 5
+                    best_of=1,             # Faster than 5
+                    condition_on_previous_text=False,
+                    initial_prompt=self.initial_prompt,
+                    no_speech_threshold=0.7,
+                    compression_ratio_threshold=2.4,  # More aggressively filter garbage
+                )
+
+                text_parts = []
+                for segment in segments:
+                    # Filter segments with high "no speech" probability
+                    no_speech = getattr(segment, 'no_speech_prob', 0.0)
+                    if no_speech < 0.7:
+                        text_parts.append(segment.text)
+
+                text = " ".join(text_parts).strip()
             
             # Apply autocorrection if available
             if text and fix_callback:
@@ -376,6 +389,11 @@ class ListenerConfig:
     wake_word_threshold: float = 0.5
     input_device: Optional[str] = None
     output_device: Optional[str] = None
+    # STT engine: "faster-whisper" | "mlx-whisper" | "elevenlabs"
+    stt_engine: str = "faster-whisper"
+    stt_elevenlabs_api_key: str = ""
+    stt_elevenlabs_language: str = ""
+    stt_elevenlabs_model_id: str = "scribe_v2"
 
 
 class WakeWordDetector:
@@ -467,8 +485,9 @@ class KiwiListener:
         self.on_speech = on_speech
         self.on_dialog_timeout = on_dialog_timeout
         self.dialog_timeout = dialog_timeout
-        
+
         self.model = None
+        self._elevenlabs_stt = None  # Set by load_model() when engine=elevenlabs
 
         # === i18n: Load locale-aware constants (fallback to module-level defaults) ===
         self.wake_word = t("wake_word.keyword") or WAKE_WORD
@@ -1174,26 +1193,31 @@ class KiwiListener:
             if duration < 0.3:
                 return False
 
-            segments, _info = self.model.transcribe(
-                audio,
-                language="ru",
-                task="transcribe",
-                beam_size=1,
-                best_of=1,
-                condition_on_previous_text=False,
-                initial_prompt=self.whisper_prompt,
-                no_speech_threshold=0.85,
-            )
+            # ElevenLabs cloud STT path
+            if self._elevenlabs_stt is not None:
+                result = self._elevenlabs_stt.transcribe(audio, sample_rate=self.config.sample_rate)
+                text = (result or "").strip().lower()
+            else:
+                segments, _info = self.model.transcribe(
+                    audio,
+                    language="ru",
+                    task="transcribe",
+                    beam_size=1,
+                    best_of=1,
+                    condition_on_previous_text=False,
+                    initial_prompt=self.whisper_prompt,
+                    no_speech_threshold=0.85,
+                )
 
-            text_parts = []
-            for seg in segments:
-                if getattr(seg, 'no_speech_prob', 0.0) > 0.85:
-                    continue
-                if getattr(seg, 'avg_logprob', 0.0) < -1.0:
-                    continue
-                text_parts.append(seg.text)
+                text_parts = []
+                for seg in segments:
+                    if getattr(seg, 'no_speech_prob', 0.0) > 0.85:
+                        continue
+                    if getattr(seg, 'avg_logprob', 0.0) < -1.0:
+                        continue
+                    text_parts.append(seg.text)
 
-            text = " ".join(text_parts).strip().lower()
+                text = " ".join(text_parts).strip().lower()
             if not text:
                 return False
 
@@ -1211,9 +1235,28 @@ class KiwiListener:
         return False
 
     def load_model(self):
-        """Loads the Whisper model."""
+        """Loads the STT model (Whisper or ElevenLabs cloud)."""
         log_func = kiwi_log if UTILS_AVAILABLE else lambda tag, msg: print(f"[{tag}] {msg}", flush=True)
-        
+
+        # ElevenLabs cloud STT — no local model needed
+        if self.config.stt_engine == "elevenlabs":
+            if self._elevenlabs_stt is not None:
+                return
+            if not ELEVENLABS_STT_AVAILABLE:
+                log_func("11L-STT", "ElevenLabs STT module not available", level="ERROR")
+                raise RuntimeError("ElevenLabs STT not available (missing dependencies)")
+            self._elevenlabs_stt = ElevenLabsSTT(
+                api_key=self.config.stt_elevenlabs_api_key,
+                language_code=self.config.stt_elevenlabs_language,
+                model_id=self.config.stt_elevenlabs_model_id,
+            )
+            if not self._elevenlabs_stt.load():
+                self._elevenlabs_stt = None
+                raise RuntimeError("ElevenLabs STT failed to load (check API key)")
+            # Set self.model to a sentinel so callers that check `self.model is None` still work
+            self.model = True
+            return
+
         log_func("WHISPER", f"load_model() called, model is None: {self.model is None}")
         if self.model is None:
             log_func("WHISPER", f"Loading model: {self.config.model_name}...")
@@ -1827,6 +1870,7 @@ class KiwiListener:
                             chunk_interval=self._streaming_chunk_interval,
                             min_audio_for_stream=self._streaming_min_audio,
                             initial_prompt=self.whisper_prompt,
+                            elevenlabs_stt=self._elevenlabs_stt,
                         )
                 else:
                     # FIX: Extend dialog timeout while speech is ongoing (to not interrupt)
@@ -2506,13 +2550,30 @@ class KiwiListener:
         """Recognizes speech from audio with autocorrection and hallucination filtering."""
         try:
             duration = len(audio) / self.config.sample_rate
+
+            # ElevenLabs cloud STT path
+            if self._elevenlabs_stt is not None:
+                kiwi_log("11L-STT", f"Input audio: shape={audio.shape}, duration={duration:.2f}s")
+                if duration < 0.4:
+                    kiwi_log("11L-STT", f"Audio too short ({duration:.2f}s < 0.4s), skipping")
+                    return None
+                full_text = self._elevenlabs_stt.transcribe(audio, sample_rate=self.config.sample_rate)
+                if full_text:
+                    text_lower = full_text.strip().lower()
+                    for pattern in self.hallucination_phrases:
+                        if pattern in text_lower:
+                            kiwi_log("11L-STT", f"Hallucination filtered: '{full_text}' (matched: '{pattern}')", level="WARNING")
+                            return None
+                    full_text = self._fix_transcription(full_text)
+                return full_text if full_text else None
+
             kiwi_log("WHISPER", f"Input audio: shape={audio.shape}, duration={duration:.2f}s, range=[{audio.min():.3f}, {audio.max():.3f}]")
-            
+
             # Audio too short -- often garbage
             if duration < 0.4:
                 kiwi_log("WHISPER", f"Audio too short ({duration:.2f}s < 0.4s), skipping")
                 return None
-            
+
             segments, info = self.model.transcribe(
                 audio,
                 language="ru",

@@ -338,6 +338,10 @@ class KiwiServiceOpenClaw(
             wake_word_threshold=self.config.wake_word_threshold,
             input_device=self.config.input_device,
             output_device=self.config.output_device,
+            stt_engine=self.config.stt_engine,
+            stt_elevenlabs_api_key=self.config.stt_elevenlabs_api_key,
+            stt_elevenlabs_language=self.config.stt_elevenlabs_language_code or self.config.language,
+            stt_elevenlabs_model_id=self.config.stt_elevenlabs_model_id,
         )
         self.listener = KiwiListener(
             config=listener_config,

@@ -97,6 +97,7 @@ tts:
 # ---------------------------------------------------------------------------
 # engine: "faster-whisper" (default, CUDA/CPU)
 #        | "mlx-whisper"   (Apple Silicon only, requires lightning-whisper-mlx)
+#        | "elevenlabs"    (cloud, WebSocket, low latency)
 stt:
   engine: "faster-whisper"
   model: "large"
@@ -104,6 +105,11 @@ stt:
   compute_type: "float16"
   language: "ru"
   mlx_batch_size: 12
+  # ElevenLabs STT (cloud, WebSocket)
+  # Uses KIWI_ELEVENLABS_API_KEY from .env (same key as TTS)
+  elevenlabs:
+    model_id: "scribe_v2"
+    language_code: ""        # auto-detect if empty; or "ru", "en", etc.
 
 # ---------------------------------------------------------------------------
 # Wake Word

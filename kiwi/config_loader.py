@@ -126,9 +126,14 @@ class KiwiConfig:
     stt_compute_type: str = "int8"
     stt_language: str = "ru"
 
-    # STT engine: "faster-whisper" | "mlx-whisper"
+    # STT engine: "faster-whisper" | "mlx-whisper" | "elevenlabs"
     stt_engine: str = "faster-whisper"
     stt_mlx_batch_size: int = 12
+
+    # ElevenLabs STT settings
+    stt_elevenlabs_api_key: str = ""
+    stt_elevenlabs_model_id: str = "scribe_v2"
+    stt_elevenlabs_language_code: str = ""  # auto-detect if empty
 
     sample_rate: int = 24000
     output_device: Optional[str] = None
@@ -196,6 +201,12 @@ class KiwiConfig:
         config.stt_language = stt_cfg.get("language", config.stt_language)
         config.stt_engine = str(stt_cfg.get("engine", config.stt_engine)).strip().lower()
         config.stt_mlx_batch_size = int(stt_cfg.get("mlx_batch_size", config.stt_mlx_batch_size))
+
+        # ElevenLabs STT config
+        el_stt_cfg = stt_cfg.get("elevenlabs", {}) if isinstance(stt_cfg.get("elevenlabs"), dict) else {}
+        config.stt_elevenlabs_api_key = str(el_stt_cfg.get("api_key", config.stt_elevenlabs_api_key))
+        config.stt_elevenlabs_model_id = str(el_stt_cfg.get("model_id", config.stt_elevenlabs_model_id))
+        config.stt_elevenlabs_language_code = str(el_stt_cfg.get("language_code", config.stt_elevenlabs_language_code))
 
         raw_use_local_tts = tts_cfg.get("use_local_tts", config.use_local_tts)
         if isinstance(raw_use_local_tts, str):
@@ -508,6 +519,13 @@ class KiwiConfig:
         if os.getenv("KIWI_STT_ENGINE"):
             config.stt_engine = os.getenv("KIWI_STT_ENGINE").strip().lower()
 
+        # ElevenLabs STT API key: dedicated env var → TTS key fallback
+        config.stt_elevenlabs_api_key = (
+            os.environ.get("KIWI_ELEVENLABS_STT_API_KEY", "").strip()
+            or config.stt_elevenlabs_api_key
+            or config.tts_elevenlabs_api_key
+        )
+
         if os.getenv("KIWI_USE_LOCAL_TTS"):
             config.use_local_tts = os.getenv("KIWI_USE_LOCAL_TTS").lower() in ("true", "1", "yes")
         if os.getenv("KIWI_TTS_PROVIDER"):
@@ -608,6 +626,13 @@ class KiwiConfig:
         if owner_cfg.get("name"):
             config.owner_name = str(owner_cfg["name"]).strip()
 
+        # STT engine aliases & validation
+        stt_engine_aliases = {"eleven": "elevenlabs", "11labs": "elevenlabs", "whisper": "faster-whisper"}
+        config.stt_engine = stt_engine_aliases.get(config.stt_engine, config.stt_engine)
+        if config.stt_engine not in {"faster-whisper", "mlx-whisper", "elevenlabs"}:
+            kiwi_log("CONFIG", f"Unknown stt.engine='{config.stt_engine}', fallback to faster-whisper", level="WARNING")
+            config.stt_engine = "faster-whisper"
+
         if config.stt_device == "cuda" and not check_cuda_available():
             kiwi_log("CONFIG", "Requested CUDA for STT, but CUDA not available! Falling back to CPU", level="WARNING")
             config.stt_device = "cpu"
@@ -641,7 +666,12 @@ class KiwiConfig:
     def print_config_banner(self):
         """Print a startup summary with ASCII-safe formatting."""
         stt_device_label = "CUDA" if self.stt_device == "cuda" else "CPU"
-        stt_engine_label = "MLX Whisper" if self.stt_engine == "mlx-whisper" else "Faster Whisper"
+        if self.stt_engine == "elevenlabs":
+            stt_engine_label = "ElevenLabs (cloud)"
+        elif self.stt_engine == "mlx-whisper":
+            stt_engine_label = "MLX Whisper"
+        else:
+            stt_engine_label = "Faster Whisper"
         tts_device_label = None
         if self.tts_provider == "piper":
             tts_type = "Piper (local)"
