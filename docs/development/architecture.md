@@ -7,7 +7,7 @@ Mic (24kHz) / Browser WebSocket
   → Audio Callback (energy detection + Silero VAD)
   → Audio Queue
   → KiwiListener._record_loop()
-  → Faster Whisper STT (or MLX Whisper on Apple Silicon)
+  → STT (Faster Whisper | ElevenLabs | MLX Whisper)
   → Wake Word Detection ("kiwi" — text fuzzy match or ML pre-detection)
   → Speaker ID (pyannote embedding → cosine similarity)
   → Priority Gate (OWNER > FRIEND > GUEST > BLOCKED)

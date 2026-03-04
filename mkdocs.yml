@@ -86,6 +86,7 @@ nav:
     - Wake Word: features/wake-word.md
     - Speaker ID: features/speaker-id.md
     - Voice Security: features/voice-security.md
+    - STT Engines: features/stt-engines.md
     - TTS Providers: features/tts-providers.md
     - Streaming & Barge-In: features/streaming-tts.md
     - Personalities: features/souls.md

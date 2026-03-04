@@ -35,14 +35,20 @@ See [Wake Word Detection](../features/wake-word.md) for details on both engines.
 
 ```yaml
 stt:
-  engine: "faster-whisper"   # faster-whisper or mlx-whisper (Apple Silicon)
+  engine: "faster-whisper"   # faster-whisper, elevenlabs, or mlx-whisper
   model: "small"             # tiny, base, small, medium, large
   device: "cuda"             # cuda or cpu
   compute_type: "float16"    # float16 (GPU) or int8 (CPU)
+  # ElevenLabs STT (cloud, uses same API key as TTS)
+  elevenlabs:
+    model_id: "scribe_v2"
+    language_code: ""        # auto-detect if empty
 ```
 
 !!! tip "Model size tradeoff"
     `small` is the sweet spot — fast with good accuracy. Use `large` for best accuracy (slower startup), `tiny` for minimal resources.
+
+See [STT Engines](../features/stt-engines.md) for a full comparison.
 
 ### Text-to-Speech
 
@@ -156,7 +162,7 @@ All settings can be overridden via environment variables in `.env`:
 | `KIWI_WAKE_ENGINE` | Override wake word engine (`text`, `openwakeword`) |
 | `KIWI_WAKE_MODEL` | Override OpenWakeWord model |
 | `KIWI_WAKE_THRESHOLD` | Override detection threshold |
-| `KIWI_STT_ENGINE` | Override STT engine (`faster-whisper`, `mlx-whisper`) |
+| `KIWI_STT_ENGINE` | Override STT engine (`faster-whisper`, `elevenlabs`, `mlx-whisper`) |
 | `KIWI_FFMPEG_PATH` | Custom FFmpeg path |
 | `KIWI_DEBUG` | Enable debug logging |
 | `LLM_MODEL` | Override LLM model |

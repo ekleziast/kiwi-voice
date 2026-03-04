@@ -116,7 +116,7 @@ Open [http://localhost:7789](http://localhost:7789) for the web dashboard.
 ```
 Mic (24kHz) / Browser WebSocket → Audio Pipeline (Silero VAD + energy detection)
   → Wake Word (OpenWakeWord ML or text fuzzy match)
-  → Faster Whisper STT (or MLX Whisper on Apple Silicon)
+  → STT (Faster Whisper | ElevenLabs | MLX Whisper)
   → Speaker ID (pyannote embeddings) → Priority Gate (Owner/Friend/Guest/Blocked)
   → Voice Security (dangerous command regex → Telegram approval)
   → OpenClaw Gateway (WebSocket v3)
