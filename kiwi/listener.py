@@ -547,6 +547,7 @@ class KiwiListener:
         self._silence_duration_monologue = 3.5      # Pause for monologues (>8s)
         self._long_speech_threshold = 3.0           # "Long phrase" threshold
         self._monologue_threshold = 8.0             # "Monologue" threshold
+        self._post_wake_silence_duration = 3.0      # Extended pause after wake word detected mid-speech
         
         # === VAD-ENHANCED END-OF-SPEECH DETECTION ===
         self._vad_end_speech_check = True           # Use VAD to confirm end of speech
@@ -775,7 +776,11 @@ class KiwiListener:
                     if 'monologue_threshold' in realtime_config:
                         self._monologue_threshold = realtime_config['monologue_threshold']
                         kiwi_log("CONFIG", f"Loaded monologue_threshold={self._monologue_threshold}s from config")
-                    
+
+                    if 'post_wake_silence_duration' in realtime_config:
+                        self._post_wake_silence_duration = realtime_config['post_wake_silence_duration']
+                        kiwi_log("CONFIG", f"Loaded post_wake_silence_duration={self._post_wake_silence_duration}s from config")
+
                     # === VAD PARAMETERS ===
                     if 'vad_end_speech_check' in realtime_config:
                         self._vad_end_speech_check = realtime_config['vad_end_speech_check']
@@ -828,10 +833,10 @@ class KiwiListener:
     
     def _get_silence_duration(self, speech_duration: float) -> float:
         """Adaptive pause: the longer the speech, the longer the allowed pause.
-        
+
         Args:
             speech_duration: Duration of current speech in seconds
-            
+
         Returns:
             Pause duration (in seconds) for ending speech
         """
@@ -839,8 +844,13 @@ class KiwiListener:
             return self._silence_duration_monologue  # 3.5s
         elif speech_duration >= self._long_speech_threshold:
             return self._silence_duration_long_speech  # 2.5s
-        else:
-            return self._silence_duration_end  # (base)
+
+        # When wake word detected mid-speech via streaming, extend silence tolerance
+        # so the user has time to finish their command after saying "kiwi"
+        if self._early_wake_detected:
+            return self._post_wake_silence_duration
+
+        return self._silence_duration_end  # (base)
 
     def _get_effective_min_speech_volume(self) -> float:
         """Adaptive minimum volume for starting speech recording.

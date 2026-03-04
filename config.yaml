@@ -160,6 +160,10 @@ realtime:
   long_speech_threshold: 3.0
   monologue_threshold: 10.0
 
+  # Extended silence tolerance after wake word detected mid-speech
+  # Gives user more time to finish command after saying "kiwi"
+  post_wake_silence_duration: 3.0
+
   # VAD-assisted end-of-speech
   vad_end_speech_check: true
   vad_end_speech_frames: 5
